@@ -1,3 +1,5 @@
 .trae/
+.agents/
+.github/
 .DS_Store
 Thumbs.db

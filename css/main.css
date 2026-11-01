@@ -1,0 +1,573 @@
+:root {
+  --bg-dark: #070810;
+  --cyber-cyan: #00f3ff;
+  --cyber-green: #00ff88;
+  --cyber-magenta: #ff0055;
+  --cyber-yellow: #ffe600;
+  --cyber-purple: #b829ff;
+  --cyber-orange: #ff6a00;
+  --hud-bg: rgba(10, 14, 26, 0.84);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-dark);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', monospace, sans-serif;
+  color: #e8f4ff;
+}
+
+#game-wrapper {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, #12172e 0%, #070810 75%);
+  transition: background 0.8s ease;
+}
+
+#game-wrapper.biome-bsod {
+  background: radial-gradient(circle at 50% 35%, #002060 0%, #03091e 75%);
+}
+
+#game-wrapper.biome-kernel {
+  background: radial-gradient(circle at 50% 35%, #2b0912 0%, #090408 75%);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+/* 顶部 HUD */
+#hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.hud-card {
+  background: var(--hud-bg);
+  border: 1px solid rgba(0, 243, 255, 0.35);
+  box-shadow: 0 0 16px rgba(0, 243, 255, 0.12), inset 0 0 12px rgba(0, 243, 255, 0.06);
+  border-radius: 8px;
+  padding: 8px 14px;
+  backdrop-filter: blur(6px);
+}
+
+/* 左侧计分、距离与扇区信息 */
+.left-hud-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stats-box {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-label {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: #88a4c8;
+  text-transform: uppercase;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--cyber-cyan);
+  text-shadow: 0 0 10px rgba(0, 243, 255, 0.55);
+}
+
+.stat-value.score-val {
+  color: var(--cyber-yellow);
+  text-shadow: 0 0 10px rgba(255, 230, 0, 0.55);
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: #7b90b2;
+  font-family: 'Consolas', monospace;
+}
+
+.wallet-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: 'Consolas', monospace;
+  font-weight: 700;
+}
+
+.wallet-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wallet-coin { color: var(--cyber-yellow); }
+.wallet-shard { color: var(--cyber-magenta); }
+.sector-badge {
+  color: var(--cyber-green);
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  padding-left: 10px;
+  font-size: 11px;
+}
+
+/* 中央：生命值血条 + 网络带宽能量槽 + 技能冷却栏 + Boss 血条 */
+.center-hud {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  max-width: 520px;
+}
+
+.bars-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hp-wrap, .bandwidth-wrap, .boss-hp-wrap {
+  width: 100%;
+  background: var(--hud-bg);
+  border: 1px solid rgba(0, 243, 255, 0.4);
+  border-radius: 8px;
+  padding: 5px 12px;
+  box-shadow: 0 0 15px rgba(0, 243, 255, 0.15);
+}
+
+.hp-wrap {
+  border-color: rgba(0, 255, 136, 0.45);
+}
+
+.boss-hp-wrap {
+  border-color: rgba(255, 0, 85, 0.85);
+  background: rgba(28, 6, 18, 0.9);
+  box-shadow: 0 0 22px rgba(255, 0, 85, 0.35);
+}
+
+.boss-hp-wrap.hidden {
+  display: none;
+}
+
+.hp-header, .bandwidth-header, .boss-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 3px;
+  letter-spacing: 0.8px;
+  color: var(--cyber-cyan);
+}
+
+.hp-header { color: var(--cyber-green); }
+.boss-header { color: #ff4d88; font-size: 12px; }
+
+.diff-pill {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 5px;
+  background: rgba(0, 243, 255, 0.18);
+  border: 1px solid var(--cyber-cyan);
+  color: #fff;
+  vertical-align: middle;
+}
+
+.shield-pill {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 5px;
+  background: rgba(184, 41, 255, 0.25);
+  border: 1px solid var(--cyber-purple);
+  color: #e8c4ff;
+}
+
+.hp-bar-bg, .bandwidth-bar-bg, .boss-bar-bg {
+  width: 100%;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+#hp-trail, #boss-hp-trail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.85);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 1;
+}
+
+#hp-fill {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #00ff88, #00f3ff);
+  box-shadow: 0 0 12px #00ff88;
+  transition: width 0.08s linear, background 0.2s;
+  z-index: 2;
+}
+
+#hp-fill.hp-warn {
+  background: linear-gradient(90deg, #ffe600, #ff8800);
+  box-shadow: 0 0 12px #ffe600;
+}
+
+#hp-fill.hp-danger {
+  background: linear-gradient(90deg, #ff0055, #ff3300);
+  box-shadow: 0 0 14px #ff0055;
+  animation: blink-Alert 0.25s infinite alternate;
+}
+
+#boss-hp-fill {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ff0055, #ff6a00);
+  box-shadow: 0 0 14px #ff0055;
+  transition: width 0.08s linear;
+  z-index: 2;
+}
+
+#bandwidth-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #00ff88, #00f3ff);
+  box-shadow: 0 0 12px #00f3ff;
+  transition: background 0.15s;
+}
+
+#bandwidth-fill.draining {
+  background: linear-gradient(90deg, #ff0055, #ff7700);
+  box-shadow: 0 0 15px #ff0055;
+}
+
+#bandwidth-fill.overheated {
+  background: #ff0055;
+  animation: blink-Alert 0.25s infinite alternate;
+}
+
+/* 技能状态徽章栏 */
+.skill-status-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.skill-badge {
+  position: relative;
+  width: 118px;
+  height: 40px;
+  background: var(--hud-bg);
+  border: 1px solid rgba(0, 243, 255, 0.35);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 6px;
+}
+
+.skill-badge.ready {
+  border-color: var(--cyber-green);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
+}
+
+.skill-cd-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  background: rgba(255, 0, 85, 0.35);
+  transition: height 0.05s linear;
+  pointer-events: none;
+}
+
+.skill-key {
+  background: rgba(0, 243, 255, 0.16);
+  border: 1px solid var(--cyber-cyan);
+  color: var(--cyber-cyan);
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 4px;
+  z-index: 1;
+  font-family: 'Consolas', monospace;
+}
+
+.skill-info {
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+}
+
+.skill-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.skill-timer {
+  font-size: 10px;
+  font-family: 'Consolas', monospace;
+  color: var(--cyber-green);
+}
+
+/* 局内已激活的 Roguelike 协议图标栏 */
+.active-perks-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  min-height: 22px;
+}
+
+.perk-mini-chip {
+  background: rgba(184, 41, 255, 0.22);
+  border: 1px solid rgba(184, 41, 255, 0.7);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #f0d8ff;
+  box-shadow: 0 0 8px rgba(184, 41, 255, 0.3);
+}
+
+/* 右侧 Ping 监控器与辅助按钮 */
+.right-hud {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  pointer-events: auto;
+}
+
+#ping-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--cyber-green);
+  transition: all 0.12s;
+}
+
+#ping-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--cyber-green);
+  box-shadow: 0 0 8px var(--cyber-green);
+}
+
+#ping-box.lag-danger {
+  color: #fff;
+  background: rgba(255, 0, 85, 0.88);
+  border-color: var(--cyber-yellow);
+  box-shadow: 0 0 24px rgba(255, 0, 85, 0.9);
+  animation: glitch-jitter 0.1s infinite;
+}
+
+#ping-box.lag-danger #ping-dot {
+  background: var(--cyber-yellow);
+  box-shadow: 0 0 10px var(--cyber-yellow);
+}
+
+.hud-toggles {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mini-btn {
+  background: rgba(10, 14, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #b8cde8;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mini-btn:hover {
+  border-color: var(--cyber-cyan);
+  color: #fff;
+}
+
+.mini-btn.active {
+  border-color: var(--cyber-green);
+  color: var(--cyber-green);
+}
+
+/* 触屏虚拟按键区 */
+#touch-controls-left {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  display: flex;
+  gap: 10px;
+  z-index: 15;
+}
+
+#touch-controls {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, 68px);
+  grid-template-rows: repeat(2, 68px);
+  gap: 10px;
+  z-index: 15;
+}
+
+.touch-btn {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  border-radius: 14px;
+  background: rgba(10, 16, 32, 0.78);
+  border: 2px solid rgba(0, 243, 255, 0.55);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), inset 0 0 12px rgba(0, 243, 255, 0.15);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: transform 0.08s, border-color 0.12s, box-shadow 0.12s;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.touch-btn:active, .touch-btn.pressed {
+  transform: scale(0.92);
+  border-color: var(--cyber-yellow);
+  box-shadow: 0 0 20px rgba(255, 230, 0, 0.65);
+}
+
+.touch-btn.btn-slash {
+  border-color: rgba(255, 230, 0, 0.8);
+}
+
+.touch-btn.btn-lag {
+  border-color: rgba(255, 0, 85, 0.75);
+}
+
+.touch-btn.btn-rewind {
+  border-color: rgba(0, 255, 136, 0.75);
+}
+
+.touch-btn.btn-phase {
+  border-color: rgba(184, 41, 255, 0.8);
+}
+
+.touch-btn .btn-icon {
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+
+.touch-btn .btn-title {
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.touch-btn .btn-sub {
+  font-size: 8px;
+  color: #9ab4d8;
+  font-family: 'Consolas', monospace;
+}
+
+.touch-cd-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  background: rgba(255, 0, 85, 0.45);
+  pointer-events: none;
+}
+
+@media (max-width: 820px) {
+  #hud {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .stat-value { font-size: 17px; }
+  .center-hud {
+    order: 3;
+    max-width: 100%;
+    width: 100%;
+  }
+  .skill-badge {
+    width: 96px;
+    height: 34px;
+  }
+  #touch-controls {
+    right: 10px;
+    bottom: 10px;
+    grid-template-columns: repeat(3, 58px);
+    grid-template-rows: repeat(2, 58px);
+    gap: 7px;
+  }
+  #touch-controls-left {
+    left: 10px;
+    bottom: 10px;
+  }
+  .touch-btn {
+    width: 58px;
+    height: 58px;
+  }
+}

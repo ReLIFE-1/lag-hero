@@ -1,0 +1,3423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>卡顿英雄：时空故障 | Lag Hero: Time Glitch</title>
+  <style>
+    :root {
+      --bg-dark: #070810;
+      --cyber-cyan: #00f3ff;
+      --cyber-green: #00ff88;
+      --cyber-magenta: #ff0055;
+      --cyber-yellow: #ffe600;
+      --cyber-purple: #b829ff;
+      --hud-bg: rgba(10, 14, 26, 0.82);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', monospace, sans-serif;
+      color: #e8f4ff;
+    }
+
+    #game-wrapper {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 35%, #12172e 0%, #070810 75%);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      transition: filter 0.15s ease, transform 0.15s ease;
+    }
+
+    /* 眩晕与卡顿视觉滤镜 (突出“卡”与时空眩晕感) */
+    #game-wrapper.lag-active:not(.reduce-motion) canvas {
+      filter: contrast(1.26) saturate(1.55) hue-rotate(-14deg)
+              drop-shadow(-7px 0 0 rgba(255, 0, 85, 0.72))
+              drop-shadow(7px 0 0 rgba(0, 243, 255, 0.72));
+      animation: vertigo-dizzy 0.42s infinite ease-in-out;
+    }
+
+    #game-wrapper.phase-active:not(.reduce-motion) canvas {
+      filter: contrast(1.2) saturate(1.4) hue-rotate(22deg)
+              drop-shadow(-5px -2px 0 rgba(184, 41, 255, 0.75))
+              drop-shadow(5px 2px 0 rgba(0, 243, 255, 0.75));
+    }
+
+    /* CRT 扫描线与眩晕暗角层 */
+    #crt-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      background:
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.30) 50%),
+        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 4px, 6px 100%;
+      opacity: 0.45;
+      transition: opacity 0.12s ease, box-shadow 0.15s ease;
+    }
+
+    #game-wrapper.lag-active #crt-overlay {
+      opacity: 0.96;
+      background-size: 100% 3px, 4px 100%;
+      box-shadow:
+        inset 0 0 110px rgba(255, 0, 85, 0.58),
+        inset 0 0 45px rgba(0, 243, 255, 0.48);
+    }
+
+    #game-wrapper.phase-active #crt-overlay {
+      opacity: 0.88;
+      box-shadow:
+        inset 0 0 95px rgba(184, 41, 255, 0.52),
+        inset 0 0 35px rgba(0, 243, 255, 0.42);
+    }
+
+    /* 顶部 HUD */
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 14px 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .hud-card {
+      background: var(--hud-bg);
+      border: 1px solid rgba(0, 243, 255, 0.35);
+      box-shadow: 0 0 16px rgba(0, 243, 255, 0.12), inset 0 0 12px rgba(0, 243, 255, 0.06);
+      border-radius: 8px;
+      padding: 10px 16px;
+      backdrop-filter: blur(6px);
+    }
+
+    /* 左侧计分与距离 */
+    .stats-box {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: #88a4c8;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 800;
+      font-family: 'Consolas', 'Courier New', monospace;
+      color: var(--cyber-cyan);
+      text-shadow: 0 0 10px rgba(0, 243, 255, 0.55);
+    }
+
+    .stat-value.score-val {
+      color: var(--cyber-yellow);
+      text-shadow: 0 0 10px rgba(255, 230, 0, 0.55);
+    }
+
+    .stat-sub {
+      font-size: 11px;
+      color: #7b90b2;
+      font-family: 'Consolas', monospace;
+    }
+
+    /* 中央：生命值血条 + 网络带宽能量槽 + 技能冷却图标 */
+    .center-hud {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      max-width: 460px;
+    }
+
+    .bars-stack {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .hp-wrap, .bandwidth-wrap {
+      width: 100%;
+      background: var(--hud-bg);
+      border: 1px solid rgba(0, 243, 255, 0.4);
+      border-radius: 8px;
+      padding: 6px 14px;
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.15);
+    }
+
+    .hp-wrap {
+      border-color: rgba(0, 255, 136, 0.45);
+    }
+
+    .hp-header, .bandwidth-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      letter-spacing: 1px;
+      color: var(--cyber-cyan);
+    }
+
+    .hp-header {
+      color: var(--cyber-green);
+    }
+
+    .diff-pill {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+      background: rgba(0, 243, 255, 0.18);
+      border: 1px solid var(--cyber-cyan);
+      color: #fff;
+      vertical-align: middle;
+    }
+
+    .hp-bar-bg, .bandwidth-bar-bg {
+      width: 100%;
+      height: 11px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    /* 血条延迟缓冲层 (`game-feel` 受击残影白条) */
+    #hp-trail {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.85);
+      transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+      z-index: 1;
+    }
+
+    #hp-fill {
+      position: relative;
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #00ff88, #00f3ff);
+      box-shadow: 0 0 12px #00ff88;
+      transition: width 0.08s linear, background 0.2s;
+      z-index: 2;
+    }
+
+    #hp-fill.hp-warn {
+      background: linear-gradient(90deg, #ff9900, #ffe600);
+      box-shadow: 0 0 12px #ffe600;
+    }
+
+    #hp-fill.hp-danger {
+      background: linear-gradient(90deg, #ff0055, #ff5500);
+      box-shadow: 0 0 16px #ff0055;
+      animation: blink-Alert 0.28s infinite alternate;
+    }
+
+    #bandwidth-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #00ff88, #00f3ff);
+      box-shadow: 0 0 12px #00f3ff;
+      transition: background 0.15s;
+    }
+
+    #bandwidth-fill.draining {
+      background: linear-gradient(90deg, #ff0055, #ff7700);
+      box-shadow: 0 0 15px #ff0055;
+    }
+
+    #bandwidth-fill.overheated {
+      background: #ff0055;
+      animation: blink-Alert 0.25s infinite alternate;
+    }
+
+    /* 技能状态徽章栏 */
+    .skill-status-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .skill-badge {
+      position: relative;
+      width: 132px;
+      height: 44px;
+      background: var(--hud-bg);
+      border: 1px solid rgba(0, 243, 255, 0.35);
+      border-radius: 6px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 8px;
+    }
+
+    .skill-badge.ready {
+      border-color: var(--cyber-green);
+      box-shadow: 0 0 10px rgba(0, 255, 136, 0.22);
+    }
+
+    .skill-badge.active-skill {
+      border-color: var(--cyber-yellow);
+      box-shadow: 0 0 16px rgba(255, 230, 0, 0.6);
+    }
+
+    .skill-cd-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 0%;
+      background: rgba(255, 0, 85, 0.38);
+      pointer-events: none;
+      transition: height 0.05s linear;
+    }
+
+    .skill-key {
+      background: rgba(0, 243, 255, 0.16);
+      border: 1px solid rgba(0, 243, 255, 0.5);
+      color: #fff;
+      font-family: 'Consolas', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 6px;
+      border-radius: 4px;
+      z-index: 1;
+    }
+
+    .skill-info {
+      display: flex;
+      flex-direction: column;
+      z-index: 1;
+      line-height: 1.15;
+    }
+
+    .skill-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #e8f4ff;
+    }
+
+    .skill-timer {
+      font-size: 11px;
+      font-family: 'Consolas', monospace;
+      color: var(--cyber-green);
+    }
+
+    /* 右上角 Ping 监控与设置 */
+    .right-hud {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    #ping-box {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--cyber-green);
+      border-color: rgba(0, 255, 136, 0.45);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.12s;
+    }
+
+    #ping-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--cyber-green);
+      box-shadow: 0 0 8px var(--cyber-green);
+    }
+
+    #ping-box.lag-danger {
+      color: #ff2a6d;
+      border-color: #ff0055;
+      background: rgba(45, 5, 20, 0.9);
+      box-shadow: 0 0 22px rgba(255, 0, 85, 0.7);
+      animation: glitch-jitter 0.1s infinite;
+    }
+
+    #ping-box.lag-danger #ping-dot {
+      background: #ff0055;
+      box-shadow: 0 0 12px #ff0055;
+    }
+
+    .hud-toggles {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mini-btn {
+      background: rgba(12, 18, 34, 0.8);
+      border: 1px solid rgba(0, 243, 255, 0.35);
+      color: #9ec3e6;
+      font-size: 11px;
+      padding: 4px 9px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mini-btn:hover {
+      border-color: var(--cyber-cyan);
+      color: #fff;
+    }
+
+    .mini-btn.active {
+      border-color: var(--cyber-green);
+      color: var(--cyber-green);
+    }
+
+    /* 右下角手机端与鼠标触控虚拟按键 */
+    #touch-controls {
+      position: absolute;
+      right: 20px;
+      bottom: 20px;
+      display: grid;
+      grid-template-columns: repeat(2, 74px);
+      grid-template-rows: repeat(2, 74px);
+      gap: 12px;
+      z-index: 15;
+    }
+
+    .touch-btn {
+      position: relative;
+      width: 74px;
+      height: 74px;
+      border-radius: 16px;
+      background: rgba(10, 16, 32, 0.78);
+      border: 2px solid rgba(0, 243, 255, 0.55);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), inset 0 0 12px rgba(0, 243, 255, 0.15);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      transition: transform 0.08s, border-color 0.12s, box-shadow 0.12s;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    .touch-btn:active, .touch-btn.pressed {
+      transform: scale(0.92);
+      border-color: var(--cyber-yellow);
+      box-shadow: 0 0 20px rgba(255, 230, 0, 0.65);
+    }
+
+    .touch-btn.btn-lag {
+      border-color: rgba(255, 0, 85, 0.7);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), inset 0 0 14px rgba(255, 0, 85, 0.22);
+    }
+
+    .touch-btn.btn-rewind {
+      border-color: rgba(0, 255, 136, 0.7);
+    }
+
+    .touch-btn.btn-phase {
+      border-color: rgba(184, 41, 255, 0.8);
+    }
+
+    .touch-btn .btn-icon {
+      font-size: 20px;
+      line-height: 1;
+      margin-bottom: 3px;
+    }
+
+    .touch-btn .btn-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+
+    .touch-btn .btn-sub {
+      font-size: 9px;
+      color: #9ab4d8;
+      font-family: 'Consolas', monospace;
+    }
+
+    .touch-cd-fill {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 0%;
+      background: rgba(255, 0, 85, 0.45);
+      pointer-events: none;
+    }
+
+    /* 遮罩弹窗（开始页 & 结算页） */
+    .modal-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(5, 7, 15, 0.86);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+      padding: 20px;
+      transition: opacity 0.25s ease;
+    }
+
+    .modal-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .modal-panel {
+      max-width: 780px;
+      width: 100%;
+      background: linear-gradient(145deg, rgba(14, 20, 40, 0.96), rgba(8, 10, 22, 0.98));
+      border: 2px solid var(--cyber-cyan);
+      box-shadow: 0 0 45px rgba(0, 243, 255, 0.25), inset 0 0 25px rgba(0, 243, 255, 0.08);
+      border-radius: 14px;
+      padding: 28px 32px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .glitch-title {
+      font-size: clamp(26px, 4vw, 40px);
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #fff;
+      text-shadow: -3px 0 var(--cyber-magenta), 3px 0 var(--cyber-cyan);
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: var(--cyber-cyan);
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+    }
+
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      margin-bottom: 22px;
+      text-align: left;
+    }
+
+    .skill-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(0, 243, 255, 0.28);
+      border-radius: 10px;
+      padding: 12px 14px;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+
+    .skill-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--cyber-cyan);
+    }
+
+    .skill-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .skill-card-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--cyber-yellow);
+    }
+
+    .key-pill {
+      background: rgba(0, 243, 255, 0.18);
+      border: 1px solid var(--cyber-cyan);
+      color: #fff;
+      font-family: 'Consolas', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .skill-card-desc {
+      font-size: 12px;
+      color: #b8cde8;
+      line-height: 1.45;
+    }
+
+    /* 难度选择器 */
+    .difficulty-section {
+      margin-bottom: 18px;
+    }
+
+    .difficulty-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: #9ab4d8;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .difficulty-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      max-width: 540px;
+      margin: 0 auto;
+    }
+
+    .diff-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1.5px solid rgba(0, 243, 255, 0.28);
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: #c8def8;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.14s ease;
+    }
+
+    .diff-btn:hover {
+      border-color: var(--cyber-cyan);
+      transform: translateY(-1px);
+    }
+
+    .diff-btn.selected {
+      background: rgba(0, 243, 255, 0.14);
+      border-color: var(--cyber-green);
+      box-shadow: 0 0 16px rgba(0, 255, 136, 0.35);
+      color: #fff;
+    }
+
+    .diff-btn[data-diff="hard"].selected {
+      background: rgba(255, 0, 85, 0.16);
+      border-color: var(--cyber-magenta);
+      box-shadow: 0 0 16px rgba(255, 0, 85, 0.45);
+    }
+
+    .diff-btn .diff-name {
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 1px;
+    }
+
+    .diff-btn .diff-meta {
+      font-size: 10px;
+      color: #8ca8ca;
+      font-family: 'Consolas', monospace;
+    }
+
+    .diff-btn.selected .diff-meta {
+      color: var(--cyber-yellow);
+    }
+
+    .modal-btn-row {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: linear-gradient(90deg, var(--cyber-cyan), var(--cyber-green));
+      color: #050811;
+      font-size: 17px;
+      font-weight: 900;
+      padding: 12px 30px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      letter-spacing: 1.5px;
+      box-shadow: 0 0 25px rgba(0, 243, 255, 0.55);
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+
+    .cta-btn:hover {
+      transform: scale(1.04);
+      box-shadow: 0 0 34px rgba(0, 255, 136, 0.85);
+    }
+
+    .cta-btn:active {
+      transform: scale(0.97);
+    }
+
+    .cta-btn.secondary {
+      background: linear-gradient(90deg, #b829ff, #ff0055);
+      color: #fff;
+      box-shadow: 0 0 22px rgba(255, 0, 85, 0.45);
+    }
+
+    .cta-btn.ghost {
+      background: rgba(16, 26, 48, 0.9);
+      color: var(--cyber-cyan);
+      border: 1.5px solid var(--cyber-cyan);
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);
+    }
+
+    /* 结算面板数据 */
+    .gameover-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin: 20px 0 24px;
+    }
+
+    .go-stat-box {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(0, 243, 255, 0.25);
+      border-radius: 10px;
+      padding: 14px 10px;
+    }
+
+    .go-stat-label {
+      font-size: 12px;
+      color: #8da9c4;
+      margin-bottom: 4px;
+    }
+
+    .go-stat-num {
+      font-size: 28px;
+      font-weight: 900;
+      font-family: 'Consolas', monospace;
+      color: var(--cyber-cyan);
+    }
+
+    .go-stat-num.highlight {
+      color: var(--cyber-yellow);
+    }
+
+    .hint-line {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #7c96b8;
+    }
+
+    @keyframes blink-Alert {
+      from { opacity: 0.45; }
+      to { opacity: 1; }
+    }
+
+    @keyframes glitch-jitter {
+      0% { transform: translate(0, 0); }
+      25% { transform: translate(-2px, 1px); }
+      50% { transform: translate(2px, -1px); }
+      75% { transform: translate(-1px, -1px); }
+      100% { transform: translate(1px, 1px); }
+    }
+
+    /* 主动卡死眩晕摇晃与抽帧错位动画 */
+    @keyframes vertigo-dizzy {
+      0%   { transform: scale(1.018) rotate(-0.5deg) skewX(-0.8deg); }
+      25%  { transform: scale(1.026) rotate(0.6deg) skewX(1.1deg); }
+      50%  { transform: scale(1.015) rotate(-0.4deg) skewY(0.5deg); }
+      75%  { transform: scale(1.028) rotate(0.5deg) skewX(-1.0deg); }
+      100% { transform: scale(1.018) rotate(-0.5deg) skewX(-0.8deg); }
+    }
+
+    @media (max-width: 768px) {
+      #hud {
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        gap: 8px;
+      }
+      .stat-value {
+        font-size: 18px;
+      }
+      .center-hud {
+        order: 3;
+        max-width: 100%;
+        width: 100%;
+      }
+      .skill-badge {
+        width: 115px;
+        height: 38px;
+      }
+      #touch-controls {
+        right: 14px;
+        bottom: 14px;
+        grid-template-columns: repeat(2, 66px);
+        grid-template-rows: repeat(2, 66px);
+        gap: 9px;
+      }
+      .touch-btn {
+        width: 66px;
+        height: 66px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="game-wrapper">
+    <canvas id="game-canvas" tabindex="-1"></canvas>
+    <div id="crt-overlay"></div>
+
+    <!-- 顶部 HUD -->
+    <div id="hud">
+      <div class="hud-card stats-box">
+        <div class="stat-item">
+          <span class="stat-label">奔跑距离 DISTANCE</span>
+          <span class="stat-value" id="hud-distance">0m</span>
+          <span class="stat-sub" id="hud-speed">SPEED: 1.0x</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">数据总分 SCORE</span>
+          <span class="stat-value score-val" id="hud-score">0</span>
+          <span class="stat-sub" id="hud-best">BEST: 0</span>
+        </div>
+      </div>
+
+      <div class="center-hud">
+        <div class="bars-stack">
+          <div class="hp-wrap">
+            <div class="hp-header">
+              <span>♥ 系统生命值 HP <span class="diff-pill" id="hud-diff-tag">中等</span></span>
+              <span id="hp-text">100 / 100</span>
+            </div>
+            <div class="hp-bar-bg">
+              <div id="hp-trail"></div>
+              <div id="hp-fill"></div>
+            </div>
+          </div>
+
+          <div class="bandwidth-wrap">
+            <div class="bandwidth-header">
+              <span>[SPACE] 主动卡死 · 网络带宽能量槽</span>
+              <span id="bandwidth-text">100%</span>
+            </div>
+            <div class="bandwidth-bar-bg">
+              <div id="bandwidth-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="skill-status-row">
+          <div class="skill-badge ready" id="badge-rewind">
+            <div class="skill-cd-overlay" id="cd-rewind"></div>
+            <span class="skill-key">SHIFT/Q</span>
+            <div class="skill-info">
+              <span class="skill-name">丢包回溯</span>
+              <span class="skill-timer" id="timer-rewind">READY</span>
+            </div>
+          </div>
+
+          <div class="skill-badge ready" id="badge-phase">
+            <div class="skill-cd-overlay" id="cd-phase"></div>
+            <span class="skill-key">S / E</span>
+            <div class="skill-info">
+              <span class="skill-name">穿模滑铲</span>
+              <span class="skill-timer" id="timer-phase">READY</span>
+              </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-hud">
+        <div class="hud-card" id="ping-box">
+          <span id="ping-dot"></span>
+          <span id="ping-text">Ping: 25ms | 60 FPS</span>
+        </div>
+        <div class="hud-toggles">
+          <button type="button" class="mini-btn" id="btn-pause" title="暂停游戏 (ESC)">⏸ 暂停 [ESC]</button>
+          <button type="button" class="mini-btn active" id="btn-sfx" title="音效开关">SFX: ON</button>
+          <button type="button" class="mini-btn" id="btn-reduce-motion" title="减弱震屏与眩晕滤镜 (无障碍选项)">减弱眩晕: OFF</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右下角触屏/鼠标虚拟按键 -->
+    <div id="touch-controls">
+      <div class="touch-btn" id="vbtn-jump" data-action="jump">
+        <span class="btn-icon">▲</span>
+        <span class="btn-title">二段跳</span>
+        <span class="btn-sub">W / UP</span>
+      </div>
+      <div class="touch-btn btn-lag" id="vbtn-lag" data-action="lag">
+        <span class="btn-icon">⏸</span>
+        <span class="btn-title">主动卡死</span>
+        <span class="btn-sub">按住 SPACE</span>
+      </div>
+      <div class="touch-btn btn-rewind" id="vbtn-rewind" data-action="rewind">
+        <div class="touch-cd-fill" id="vcd-rewind"></div>
+        <span class="btn-icon">⏪</span>
+        <span class="btn-title">丢包回溯</span>
+        <span class="btn-sub">SHIFT / Q</span>
+      </div>
+      <div class="touch-btn btn-phase" id="vbtn-phase" data-action="phase">
+        <div class="touch-cd-fill" id="vcd-phase"></div>
+        <span class="btn-icon">⚡</span>
+        <span class="btn-title">穿模滑铲</span>
+        <span class="btn-sub">S / DOWN</span>
+      </div>
+    </div>
+
+    <!-- 开始遮罩页 -->
+    <div class="modal-overlay" id="start-modal">
+      <div class="modal-panel">
+        <h1 class="glitch-title">卡顿英雄：时空故障</h1>
+        <p class="subtitle">LAG HERO: TIME GLITCH — 将网络恶疾化为三大时空神技！</p>
+
+        <div class="skills-grid">
+          <div class="skill-card">
+            <div class="skill-card-head">
+              <span class="skill-card-title">▲ 脉冲二段跳</span>
+              <span class="key-pill">W / ↑</span>
+            </div>
+            <p class="skill-card-desc">
+              支持<strong>空中二段跳</strong>、土狼时间与长按高跳/轻点小跳。跃过地面电刺，登上数据浮台收集金币。
+            </p>
+          </div>
+
+          <div class="skill-card">
+            <div class="skill-card-head">
+              <span class="skill-card-title">⏸ 主动卡死</span>
+              <span class="key-pill">长按 SPACE</span>
+            </div>
+            <p class="skill-card-desc">
+              强制拉爆延迟至 <strong>999ms (FPS暴跌+眩晕残影)</strong>！旋转激光与下落闸门流速骤降至 <strong>10%</strong>，从容卡点穿越。
+            </p>
+          </div>
+
+          <div class="skill-card">
+            <div class="skill-card-head">
+              <span class="skill-card-title">⏪ 丢包回溯</span>
+              <span class="key-pill">SHIFT / Q</span>
+            </div>
+            <p class="skill-card-desc">
+              操作失误或刚受击扣血？瞬间触发雪花屏与绿色残影，<strong>倒带闪现回 1.5 秒前并挽回损失血量</strong>。
+            </p>
+          </div>
+
+          <div class="skill-card">
+            <div class="skill-card-head">
+              <span class="skill-card-title">⚡ 穿模滑铲</span>
+              <span class="key-pill">S / ↓ / E</span>
+            </div>
+            <p class="skill-card-desc">
+              面对无法跃过的<strong>巨型实心电网墙</strong>，进入 <strong>2.2 秒超长故障穿模态（无CD/极短冷却）</strong>，直接穿墙吸取 <strong>Bug 碎片回血</strong>！
+            </p>
+          </div>
+        </div>
+
+        <div class="difficulty-section">
+          <div class="difficulty-label">选择接入难度 SELECT DIFFICULTY</div>
+          <div class="difficulty-grid">
+            <button type="button" class="diff-btn" data-diff="easy">
+              <span class="diff-name">简单 EASY</span>
+              <span class="diff-meta">4次容错 · 穿模无CD · 1.0x分</span>
+            </button>
+            <button type="button" class="diff-btn selected" data-diff="medium">
+              <span class="diff-name">中等 NORMAL</span>
+              <span class="diff-meta">3次容错 · 穿模0.4s · 1.2x分</span>
+            </button>
+            <button type="button" class="diff-btn" data-diff="hard">
+              <span class="diff-name">困难 HARD</span>
+              <span class="diff-meta">2次容错 · 穿模0.8s · 1.5x分</span>
+            </button>
+          </div>
+        </div>
+
+        <button type="button" class="cta-btn" id="btn-start">▶ 接入赛博网络 (START)</button>
+        <p class="hint-line">提示：游戏中按【ESC 键】可随时暂停返回主页或重新开始</p>
+      </div>
+    </div>
+
+    <!-- ESC 暂停遮罩菜单 -->
+    <div class="modal-overlay hidden" id="pause-modal">
+      <div class="modal-panel">
+        <h1 class="glitch-title" style="color:var(--cyber-yellow);">SYSTEM PAUSED</h1>
+        <p class="subtitle">时空进程已挂起 — 按 ESC 可直接继续奔跑</p>
+
+        <div class="gameover-stats">
+          <div class="go-stat-box">
+            <div class="go-stat-label">当前距离 DISTANCE</div>
+            <div class="go-stat-num" id="pause-distance">0m</div>
+          </div>
+          <div class="go-stat-box">
+            <div class="go-stat-label">当前得分 SCORE</div>
+            <div class="go-stat-num highlight" id="pause-score">0</div>
+          </div>
+          <div class="go-stat-box">
+            <div class="go-stat-label">剩余生命 HP</div>
+            <div class="go-stat-num" id="pause-hp">100</div>
+          </div>
+        </div>
+
+        <div class="modal-btn-row">
+          <button type="button" class="cta-btn" id="btn-resume">▶ 继续游戏 (ESC)</button>
+          <button type="button" class="cta-btn secondary" id="btn-pause-restart">↻ 重新开始</button>
+          <button type="button" class="cta-btn ghost" id="btn-pause-home">⌂ 返回主页</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Over 结算页 -->
+    <div class="modal-overlay hidden" id="gameover-modal">
+      <div class="modal-panel">
+        <h1 class="glitch-title" style="color:#ff2a6d;">CONNECTION TERMINATED</h1>
+        <p class="subtitle" id="death-reason">致命碰撞：未开启穿模或回溯保护</p>
+
+        <div class="gameover-stats">
+          <div class="go-stat-box">
+            <div class="go-stat-label">奔跑距离 DISTANCE</div>
+            <div class="go-stat-num" id="go-distance">0m</div>
+          </div>
+          <div class="go-stat-box">
+            <div class="go-stat-label">最终得分 SCORE</div>
+            <div class="go-stat-num highlight" id="go-score">0</div>
+          </div>
+          <div class="go-stat-box">
+            <div class="go-stat-label">历史最高 BEST</div>
+            <div class="go-stat-num" id="go-best">0</div>
+          </div>
+        </div>
+
+        <div class="difficulty-section">
+          <div class="difficulty-label">切换重开难度 SWITCH DIFFICULTY</div>
+          <div class="difficulty-grid">
+            <button type="button" class="diff-btn" data-diff="easy">
+              <span class="diff-name">简单 EASY</span>
+              <span class="diff-meta">4次容错 · 穿模无CD · 1.0x分</span>
+            </button>
+            <button type="button" class="diff-btn selected" data-diff="medium">
+              <span class="diff-name">中等 NORMAL</span>
+              <span class="diff-meta">3次容错 · 穿模0.4s · 1.2x分</span>
+            </button>
+            <button type="button" class="diff-btn" data-diff="hard">
+              <span class="diff-name">困难 HARD</span>
+              <span class="diff-meta">2次容错 · 穿模0.8s · 1.5x分</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-btn-row">
+          <button type="button" class="cta-btn" id="btn-restart">↻ 重新连接 (SPACE / CLICK)</button>
+          <button type="button" class="cta-btn ghost" id="btn-go-home">⌂ 返回主页</button>
+        </div>
+        <p class="hint-line">按【空格键 Space】快速重开，或点击【返回主页】查看技能说明</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * 《卡顿英雄：时空故障》(Lag Hero: Time Glitch)
+     * 融合 `platformer`（基于目标高度/时间的跳跃推导、半步积分、非对称下落重力、顶点悬停、土狼时间、跳跃预输入）
+     * 与 `game-feel`（基于衰减 Trauma 的平滑正弦震屏、真实时间 Hit-Stop 顿帧、EaseOutBack 挤压拉伸、分层粒子与反馈等级）。
+     */
+
+    // ============================================================================
+    // 1. 原生合成音效系统 (Web Audio API - 零外部音频依赖)
+    // ============================================================================
+    class CyberAudio {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+        this.lagOsc = null;
+        this.lagGain = null;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      // 跳跃哔声 (支持一段跳与二段跳不同音高)
+      playJump(isDouble = false) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = isDouble ? 'square' : 'triangle';
+        const startFreq = isDouble ? 360 : 240;
+        const endFreq = isDouble ? 780 : 540;
+
+        osc.frequency.setValueAtTime(startFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.13);
+
+        gain.gain.setValueAtTime(0.16, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.14);
+      }
+
+      // 落地微沉闷音
+      playLand() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(130, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.07);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      }
+
+      // 收集金币 / Bug碎片音效
+      playPickup(isBugShard = false) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = isBugShard ? 'sawtooth' : 'sine';
+
+        if (isBugShard) {
+          osc.frequency.setValueAtTime(520, now);
+          osc.frequency.setValueAtTime(780, now + 0.05);
+          osc.frequency.setValueAtTime(1040, now + 0.10);
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.22);
+        } else {
+          osc.frequency.setValueAtTime(660, now);
+          osc.frequency.setValueAtTime(990, now + 0.05);
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.14);
+        }
+      }
+
+      // 神技一：主动卡死骤停低频音 (持续低频脉冲)
+      startLagDrone() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx || this.lagOsc) return;
+
+        const now = this.ctx.currentTime;
+        this.lagOsc = this.ctx.createOscillator();
+        this.lagGain = this.ctx.createGain();
+
+        this.lagOsc.type = 'sawtooth';
+        this.lagOsc.frequency.setValueAtTime(190, now);
+        this.lagOsc.frequency.exponentialRampToValueAtTime(52, now + 0.18);
+
+        this.lagGain.gain.setValueAtTime(0.01, now);
+        this.lagGain.gain.linearRampToValueAtTime(0.15, now + 0.06);
+
+        this.lagOsc.connect(this.lagGain);
+        this.lagGain.connect(this.ctx.destination);
+        this.lagOsc.start(now);
+      }
+
+      stopLagDrone() {
+        if (!this.lagOsc || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        try {
+          this.lagOsc.frequency.setValueAtTime(Math.max(20, this.lagOsc.frequency.value), now);
+          this.lagOsc.frequency.exponentialRampToValueAtTime(220, now + 0.08);
+          this.lagGain.gain.setValueAtTime(Math.max(0.001, this.lagGain.gain.value), now);
+          this.lagGain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+          this.lagOsc.stop(now + 0.09);
+        } catch (e) {}
+        this.lagOsc = null;
+        this.lagGain = null;
+      }
+
+      // 神技二：丢包回溯倒带哨声
+      playRewind() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const mod = this.ctx.createOscillator();
+        const modGain = this.ctx.createGain();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(980, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.14);
+        osc.frequency.exponentialRampToValueAtTime(1250, now + 0.32);
+
+        mod.type = 'square';
+        mod.frequency.setValueAtTime(45, now);
+        modGain.gain.setValueAtTime(120, now);
+
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
+
+        mod.connect(modGain);
+        modGain.connect(osc.frequency);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now);
+        mod.start(now);
+        osc.stop(now + 0.34);
+        mod.stop(now + 0.34);
+      }
+
+      // 神技三：穿模滋滋电磁杂音
+      playPhaseGlitch(shortSpark = false) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+
+        const now = this.ctx.currentTime;
+        const dur = shortSpark ? 0.12 : 0.32;
+        const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < bufferSize; i++) {
+          // 电磁脉冲调制白噪
+          const pulse = Math.sin(i * 0.09) > 0 ? 1 : -0.4;
+          data[i] = (Math.random() * 2 - 1) * pulse;
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(shortSpark ? 2400 : 1400, now);
+        filter.Q.setValueAtTime(3.5, now);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(shortSpark ? 0.18 : 0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+
+      // 撞毁爆炸音
+      playCrash() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        this.stopLagDrone();
+
+        const now = this.ctx.currentTime;
+        const dur = 0.55;
+        const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.18));
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(900, now);
+        filter.frequency.exponentialRampToValueAtTime(90, now + dur);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.38, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        // 叠加低频重击
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = 'sawtooth';
+        sub.frequency.setValueAtTime(140, now);
+        sub.frequency.exponentialRampToValueAtTime(28, now + 0.45);
+        subGain.gain.setValueAtTime(0.3, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        sub.connect(subGain);
+        subGain.connect(this.ctx.destination);
+
+        noise.start(now);
+        sub.start(now);
+        sub.stop(now + 0.45);
+      }
+
+      // 受击扣血警报音 (未致死碰撞)
+      playHurt() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(280, now);
+        osc.frequency.exponentialRampToValueAtTime(75, now + 0.22);
+
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.24);
+      }
+    }
+
+    const audio = new CyberAudio();
+
+    // ============================================================================
+    // 2. 数学与 Game-Feel 曲线工具 (`references/feedback-recipes.md`)
+    // ============================================================================
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    // EaseOutBack: 超调回弹曲线，用于跳跃/落地/技能触发时的缩放回弹 ("pop")
+    function easeOutBack(k) {
+      const c1 = 1.70158;
+      const c3 = c1 + 1;
+      const m = k - 1;
+      return 1 + c3 * m * m * m + c1 * m * m;
+    }
+
+    // EaseOutCubic: 平滑减速曲线，用于浮动文字与粒子消散
+    function easeOutCubic(k) {
+      return 1 - Math.pow(1 - k, 3);
+    }
+
+    // 1D 伪随机平滑噪声采样 (避免每帧 Math.random 造成的刺耳高频杂乱抖动)
+    function shakeAxis(seed, t) {
+      return 0.6 * Math.sin(t * 11.0 + seed) + 0.4 * Math.sin(t * 23.0 + seed * 2.0);
+    }
+
+    // ============================================================================
+    // 3. 游戏核心常量与平台跳跃参数 (`platformer` & `feel-tuning.md`)
+    // ============================================================================
+    // 使用结果导向推导跳跃物理：h = 152px (~3.5 tiles), t_apex = 0.34s
+    const JUMP_HEIGHT = 152;
+    const TIME_TO_APEX = 0.34;
+    const RISE_GRAVITY = (2 * JUMP_HEIGHT) / (TIME_TO_APEX * TIME_TO_APEX); // ~2630 px/s²
+    const JUMP_VELOCITY = -(2 * JUMP_HEIGHT) / TIME_TO_APEX;                // ~-894 px/s
+    const FALL_MULTIPLIER = 1.85;                                           // 下落重力倍率，干脆不飘
+    const FALL_GRAVITY = RISE_GRAVITY * FALL_MULTIPLIER;
+    const APEX_THRESHOLD = 85;                                              // 顶点微悬停速度阈值
+    const MAX_FALL_SPEED = 1150;
+    const COYOTE_TIME = 0.10;                                               // 离地土狼时间 0.10s
+    const JUMP_BUFFER = 0.12;                                               // 落地前跳跃预输入 0.12s
+    const VARIABLE_JUMP_CUT = 0.45;                                         // 提前松开跳跃键截断上升速度
+
+    // 技能常量与三大难度配置（简单 / 中等 / 困难）
+    const REWIND_HISTORY_SEC = 1.5;      // 回溯 1.5 秒
+    const PHASE_DURATION = 2.2;          // 穿模滑铲持续时间加长至 2.2 秒！
+    const LAG_TIME_SCALE = 0.10;         // 主动卡死：陷阱与动态机关时间流速降至 10%
+
+    const DIFFICULTY_CONFIGS = {
+      easy: {
+        key: 'easy',
+        label: '简单',
+        maxHp: 100,
+        hitDamage: 25,       // 可承受 4 次碰撞
+        baseSpeed: 330,      // 0.85x 初始速度
+        trapSpeedMult: 0.82, // 激光与闸门转速更平缓
+        lagDrain: 30,        // 带宽消耗更慢
+        lagRecharge: 38,     // 带宽恢复更快
+        rewindCd: 2.5,       // 回溯冷却 2.5 秒
+        phaseCd: 0.0,        // 简单模式：穿模滑铲完全无 CD！
+        shardHeal: 15,       // 拾取 Bug 碎片回复 15 HP
+        scoreMult: 1.0
+      },
+      medium: {
+        key: 'medium',
+        label: '中等',
+        maxHp: 100,
+        hitDamage: 35,       // 可承受 3 次碰撞
+        baseSpeed: 390,      // 1.0x 标准速度
+        trapSpeedMult: 1.0,
+        lagDrain: 40,
+        lagRecharge: 30,
+        rewindCd: 3.5,       // 回溯冷却 3.5 秒
+        phaseCd: 0.4,        // 中等模式：穿模结束仅 0.4 秒极短冷却
+        shardHeal: 10,       // 拾取 Bug 碎片回复 10 HP
+        scoreMult: 1.2
+      },
+      hard: {
+        key: 'hard',
+        label: '困难',
+        maxHp: 100,
+        hitDamage: 50,       // 仅可承受 2 次碰撞
+        baseSpeed: 470,      // 1.2x 高速狂奔
+        trapSpeedMult: 1.25, // 激光与闸门加速 25%
+        lagDrain: 50,
+        lagRecharge: 25,
+        rewindCd: 4.0,       // 回溯冷却 4.0 秒
+        phaseCd: 0.8,        // 困难模式：穿模结束仅 0.8 秒短冷却
+        shardHeal: 8,        // 拾取 Bug 碎片回复 8 HP
+        scoreMult: 1.5
+      }
+    };
+
+    function getDiff() {
+      return DIFFICULTY_CONFIGS[game.difficulty] || DIFFICULTY_CONFIGS.medium;
+    }
+
+    // ============================================================================
+    // 4. 画布与全局状态初始化
+    // ============================================================================
+    const wrapperEl = document.getElementById('game-wrapper');
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+    let GROUND_Y = H - 110;
+
+    function resizeCanvas() {
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W;
+      canvas.height = H;
+      GROUND_Y = Math.max(320, H - Math.floor(H * 0.17));
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // 无障碍与偏好设置 (`feedback-recipes.md` §5)
+    let reduceMotion = false;
+    let highScore = Number(localStorage.getItem('lag_hero_best_score') || 0);
+    document.getElementById('hud-best').textContent = `BEST: ${highScore}`;
+
+    // 相机 Trauma 震屏与眩晕模型 (`game-feel` Pattern 1)
+    const camera = {
+      trauma: 0,
+      decay: 1.35,
+      time: 0,
+      offsetX: 0,
+      offsetY: 0,
+      roll: 0,
+      chromaticPunch: 0,
+      whiteFlash: 0,
+      snowStaticTimer: 0,
+      vertigoAmount: 0, // 眩晕重影与旋涡滤镜强度 (0..1)
+      stutterTick: 0,   // 掉帧抽搐视觉计时器
+
+      addTrauma(amount) {
+        const scale = reduceMotion ? 0.25 : 1.0;
+        this.trauma = clamp(this.trauma + amount * scale, 0, 1);
+      },
+
+      addVertigo(amount) {
+        if (reduceMotion) return;
+        this.vertigoAmount = clamp(this.vertigoAmount + amount, 0, 1);
+      },
+
+      update(rawDt) {
+        this.time += rawDt * 32;
+        if (this.trauma > 0) {
+          this.trauma = Math.max(0, this.trauma - this.decay * rawDt);
+          const shake = this.trauma * this.trauma; // 二次方：小碰撞轻柔，大碰撞猛烈
+          this.offsetX = 16 * shake * shakeAxis(1.7, this.time);
+          this.offsetY = 11 * shake * shakeAxis(4.3, this.time);
+          this.roll = (reduceMotion ? 0 : 0.032) * shake * shakeAxis(8.1, this.time);
+        } else {
+          this.offsetX = 0;
+          this.offsetY = 0;
+          this.roll = 0;
+        }
+
+        if (this.chromaticPunch > 0) {
+          this.chromaticPunch = Math.max(0, this.chromaticPunch - rawDt * 2.5);
+        }
+        if (this.whiteFlash > 0) {
+          this.whiteFlash = Math.max(0, this.whiteFlash - rawDt * 5.0);
+        }
+        if (this.snowStaticTimer > 0) {
+          this.snowStaticTimer = Math.max(0, this.snowStaticTimer - rawDt);
+        }
+        if (this.vertigoAmount > 0 && !game.lagActive) {
+          this.vertigoAmount = Math.max(0, this.vertigoAmount - rawDt * 1.8);
+        }
+      }
+    };
+
+    // Real-Time Hit-Stop 顿帧器 (`game-feel` Pattern 2)
+    const hitStopState = {
+      id: 0,
+      until: 0,
+      slowScale: 1.0,
+      trigger(duration = 0.06, slow = 0.05) {
+        if (reduceMotion) duration *= 0.5;
+        this.id++;
+        this.slowScale = slow;
+        this.until = performance.now() + duration * 1000;
+      },
+      getScale(now) {
+        return now < this.until ? this.slowScale : 1.0;
+      }
+    };
+
+    // 对象池粒子、浮动文字、残影与眩晕冲击波环 (`feedback-recipes.md` §3)
+    const particles = [];
+    const popTexts = [];
+    const rewindGhosts = [];
+    const shockwaves = [];
+
+    function spawnShockwave(x, y, color = '#00f3ff', maxR = 220) {
+      if (reduceMotion) return;
+      shockwaves.push({
+        x,
+        y,
+        r: 16,
+        maxR,
+        color,
+        life: 0,
+        maxLife: 0.38
+      });
+    }
+
+    function spawnParticles(x, y, count, color, speedScale = 1, style = 'spark') {
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = (60 + Math.random() * 240) * speedScale;
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed - 60,
+          vy: Math.sin(angle) * speed - (style === 'dust' ? 80 : 30),
+          size: style === 'glitch' ? (6 + Math.random() * 10) : (3 + Math.random() * 4),
+          color,
+          life: 0,
+          maxLife: 0.22 + Math.random() * 0.28,
+          style
+        });
+      }
+    }
+
+    function spawnPopText(x, y, text, color = '#00f3ff', size = 16) {
+      popTexts.push({
+        x: x + (Math.random() - 0.5) * 24,
+        y,
+        vx: (Math.random() - 0.5) * 35,
+        vy: -95 - Math.random() * 35,
+        text,
+        color,
+        size,
+        life: 0,
+        maxLife: 0.75
+      });
+    }
+
+    // 重要性分级反馈捆绑器 (`game-feel` Pattern 4)
+    function triggerFeedback(x, y, tier, color = '#00f3ff') {
+      if (tier === 'small') {
+        camera.addTrauma(0.14);
+        spawnParticles(x, y, 6, color, 0.75, 'spark');
+      } else if (tier === 'medium') {
+        camera.addTrauma(0.38);
+        camera.addVertigo(0.45);
+        hitStopState.trigger(0.045, 0.06);
+        camera.chromaticPunch = Math.max(camera.chromaticPunch, 0.55);
+        spawnParticles(x, y, 14, color, 1.0, 'glitch');
+        spawnShockwave(x, y, color, 180);
+      } else if (tier === 'large') {
+        camera.addTrauma(0.85);
+        camera.addVertigo(0.95);
+        hitStopState.trigger(0.11, 0.03);
+        camera.chromaticPunch = 1.0;
+        if (!reduceMotion) camera.whiteFlash = 0.45;
+        spawnParticles(x, y, 34, color, 1.45, 'glitch');
+        spawnShockwave(x, y, color, 320);
+      }
+    }
+
+    // ============================================================================
+    // 5. 玩家与游戏世界状态
+    // ============================================================================
+    const game = {
+      state: 'START', // 'START' | 'PLAYING' | 'GAMEOVER'
+      difficulty: 'medium', // 'easy' | 'medium' | 'hard'
+      distance: 0,
+      bonusScore: 0,
+      baseSpeed: 390,
+      currentSpeed: 390,
+      worldScrollX: 0,
+      nextSpawnX: 650,
+      lastPatternIndex: -1,
+
+      // 神技一：主动卡死 (Lag Switch)
+      lagActive: false,
+      bandwidth: 100,
+      bandwidthOverheated: false,
+
+      // 神技二：丢包回溯 (Packet Loss)
+      rewindCd: 0,
+      historyBuffer: [], // 记录过去 1.5s 的快照
+
+      // 神技三：穿模滑铲 (Collision Glitch)
+      phaseTimer: 0,
+      phaseCd: 0,
+
+      // 背景赛博网格与建筑视差层
+      bgBuildings: [],
+      dataLines: []
+    };
+
+    const player = {
+      x: 190,
+      y: GROUND_Y,
+      vy: 0,
+      width: 40,
+      height: 58,
+      normalHeight: 58,
+      slideHeight: 32,
+      hp: 100,
+      maxHp: 100,
+      trailHp: 100, // Canvas 头顶血条缓动白条
+      onGround: true,
+      coyoteTimer: 0,
+      jumpBufferTimer: 0,
+      jumpsLeft: 2,
+      invulnTimer: 0,
+      flashTimer: 0,
+      runAnimTime: 0,
+
+      // Squash & Stretch 挤压拉伸状态 (`game-feel` Pattern 3)
+      scaleX: 1,
+      scaleY: 1,
+      startScaleX: 1,
+      startScaleY: 1,
+      scaleTimer: 1,
+      scaleDuration: 0.18,
+
+      triggerPop(sx, sy, dur = 0.18) {
+        this.startScaleX = sx;
+        this.startScaleY = sy;
+        this.scaleX = sx;
+        this.scaleY = sy;
+        this.scaleTimer = 0;
+        this.scaleDuration = dur;
+      }
+    };
+
+    // 障碍物、单向平台、金币与 Bug 碎片容器
+    let obstacles = [];
+    let platforms = [];
+    let collectibles = [];
+
+    // 初始化赛博视差背景
+    function initBackground() {
+      game.bgBuildings = [];
+      for (let i = 0; i < 18; i++) {
+        game.bgBuildings.push({
+          x: i * 150,
+          w: 80 + Math.random() * 90,
+          h: 120 + Math.random() * 240,
+          layer: i % 2 === 0 ? 0.2 : 0.42,
+          hue: i % 3 === 0 ? '#00f3ff' : (i % 3 === 1 ? '#ff0055' : '#b829ff')
+        });
+      }
+      game.dataLines = [];
+      for (let i = 0; i < 22; i++) {
+        game.dataLines.push({
+          x: Math.random() * W,
+          y: 60 + Math.random() * (GROUND_Y - 100),
+          len: 40 + Math.random() * 120,
+          speed: 180 + Math.random() * 260
+        });
+      }
+    }
+    initBackground();
+
+    // ============================================================================
+    // 6. 关卡障碍与收集物生成器 (针对三大神技专门设计的挑战)
+    // ============================================================================
+    function spawnObstaclePattern(startX) {
+      // 共有 5 种精心设计的障碍组合：
+      // 0: 高速旋转激光 (考察【主动卡死】或高超二段跳)
+      // 1: 巨型实心电网墙 + 墙内嵌满 Bug 碎片 (考察【穿模滑铲】)
+      // 2: 高频下落闸门 + 落石区 (考察【主动卡死】定格通过)
+      // 3: 单向赛博浮台 + 地面连续电刺 (考察【二段跳】与平台跳跃手感)
+      // 4: 复合故障阵列：先跳跃电刺再穿模实心电网墙
+      const diffCfg = getDiff();
+      let idx = Math.floor(Math.random() * 5);
+      if (idx === game.lastPatternIndex) idx = (idx + 1) % 5;
+      game.lastPatternIndex = idx;
+
+      if (idx === 0) {
+        // 【高速旋转激光阵列】
+        const centerY = GROUND_Y - 82;
+        obstacles.push({
+          type: 'LASER_SPINNER',
+          x: startX,
+          y: centerY,
+          radius: 92,
+          angle: Math.random() * Math.PI,
+          rotSpeed: 5.8 * diffCfg.trapSpeedMult, // 常态高速旋转，主动卡死时降至 10%
+          hubRadius: 18,
+          hint: '长按 [SPACE] 卡死激光'
+        });
+
+        // 激光周围环绕数据金币
+        for (let i = -2; i <= 2; i++) {
+          collectibles.push({
+            type: 'COIN',
+            x: startX + i * 38,
+            y: GROUND_Y - 175 - Math.abs(i) * 12,
+            r: 11,
+            collected: false
+          });
+        }
+        return startX + 430;
+      }
+
+      if (idx === 1) {
+        // 【巨型实心电网墙 (不可跳过，内嵌隐藏 Bug 碎片)】
+        const wallW = 86;
+        const wallH = 290;
+        obstacles.push({
+          type: 'FIREWALL',
+          x: startX,
+          y: GROUND_Y - wallH,
+          w: wallW,
+          h: wallH,
+          phasedBonusGiven: false,
+          hint: '按 [S/E] 穿模滑铲'
+        });
+
+        // 墙体内部嵌入 3 枚高分“隐藏 Bug 碎片”
+        for (let i = 0; i < 3; i++) {
+          collectibles.push({
+            type: 'BUG_SHARD',
+            x: startX + 20 + i * 24,
+            y: GROUND_Y - 35 - (i % 2) * 28,
+            r: 13,
+            collected: false
+          });
+        }
+        return startX + 440;
+      }
+
+      if (idx === 2) {
+        // 【高频下落激光闸门 + 赛博落石】
+        const gateW = 46;
+        const gateMaxH = 210;
+        obstacles.push({
+          type: 'SLAM_GATE',
+          x: startX,
+          y: GROUND_Y - gateMaxH,
+          w: gateW,
+          maxH: gateMaxH,
+          cycle: Math.random() * Math.PI * 2,
+          cycleSpeed: 6.4 * diffCfg.trapSpeedMult, // 常态极快上下砸落，主动卡死时定格
+          openRatio: 0,
+          hint: '看准闸门升起长按 [SPACE]'
+        });
+
+        // 后方伴随一颗高速赛博落石
+        obstacles.push({
+          type: 'FALLING_ROCK',
+          x: startX + 230,
+          y: GROUND_Y - 320,
+          w: 48,
+          h: 48,
+          vy: 0,
+          triggered: false,
+          landed: false,
+          hint: '落石预警'
+        });
+
+        for (let i = 0; i < 4; i++) {
+          collectibles.push({
+            type: 'COIN',
+            x: startX + 60 + i * 36,
+            y: GROUND_Y - 30,
+            r: 11,
+            collected: false
+          });
+        }
+        return startX + 490;
+      }
+
+      if (idx === 3) {
+        // 【单向赛博高台 + 地面电刺群】
+        const platW = 210;
+        const platY = GROUND_Y - 108;
+        platforms.push({
+          x: startX + 20,
+          y: platY,
+          w: platW,
+          h: 14
+        });
+
+        // 地面电刺
+        obstacles.push({
+          type: 'SPIKE',
+          x: startX + 55,
+          y: GROUND_Y - 42,
+          w: 135,
+          h: 42,
+          hint: '按 [W/↑] 跃上浮台'
+        });
+
+        // 浮台上方一排金币 + 末端一枚 Bug 碎片
+        for (let i = 0; i < 4; i++) {
+          collectibles.push({
+            type: 'COIN',
+            x: startX + 45 + i * 38,
+            y: platY - 28,
+            r: 11,
+            collected: false
+          });
+        }
+        collectibles.push({
+          type: 'BUG_SHARD',
+          x: startX + 210,
+          y: platY - 75,
+          r: 13,
+          collected: false
+        });
+
+        return startX + 430;
+      }
+
+      // idx === 4: 【复合考验：低矮电刺跳跃 + 实心电网墙穿模】
+      obstacles.push({
+        type: 'SPIKE',
+        x: startX,
+        y: GROUND_Y - 48,
+        w: 58,
+        h: 48,
+        hint: '跳跃 + 落地穿模'
+      });
+
+      const wallX = startX + 250;
+      obstacles.push({
+        type: 'FIREWALL',
+        x: wallX,
+        y: GROUND_Y - 280,
+        w: 80,
+        h: 280,
+        phasedBonusGiven: false,
+        hint: '按 [S/E] 穿模'
+      });
+
+      collectibles.push({
+        type: 'COIN',
+        x: startX + 29,
+        y: GROUND_Y - 125,
+        r: 11,
+        collected: false
+      });
+      collectibles.push({
+        type: 'BUG_SHARD',
+        x: wallX + 40,
+        y: GROUND_Y - 40,
+        r: 13,
+        collected: false
+      });
+
+      return startX + 520;
+    }
+
+    // ============================================================================
+    // 7. 输入控制系统 (键盘 + 鼠标 + 触屏虚拟按键)
+    // ============================================================================
+    const input = {
+      jumpPressedThisFrame: false,
+      jumpReleasedThisFrame: false,
+      jumpHeld: false,
+      lagHeldKey: false,
+      lagHeldPointer: false,
+      rewindPressedThisFrame: false,
+      phasePressedThisFrame: false,
+
+      get isLagHeld() {
+        return this.lagHeldKey || this.lagHeldPointer;
+      }
+    };
+
+    function triggerJumpInput(down) {
+      if (down) {
+        if (!input.jumpHeld) {
+          input.jumpPressedThisFrame = true;
+        }
+        input.jumpHeld = true;
+        document.getElementById('vbtn-jump').classList.add('pressed');
+      } else {
+        if (input.jumpHeld) {
+          input.jumpReleasedThisFrame = true;
+        }
+        input.jumpHeld = false;
+        document.getElementById('vbtn-jump').classList.remove('pressed');
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      // 关键修复：所有游戏按键在判断 e.repeat 前必须先 preventDefault，
+      // 防止长按空格键触发浏览器默认聚焦按钮点击导致游戏重开距离清零！
+      const gameKeys = [
+        'Space', 'Enter', 'Escape', 'KeyP',
+        'KeyW', 'ArrowUp', 'KeyS', 'ArrowDown', 'KeyE',
+        'ShiftLeft', 'ShiftRight', 'KeyQ'
+      ];
+      if (gameKeys.includes(e.code)) {
+        e.preventDefault();
+      }
+
+      if (e.repeat) return;
+
+      // ESC 或 P 键：暂停 / 继续游戏
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        if (game.state === 'PLAYING') {
+          pauseGame();
+        } else if (game.state === 'PAUSED') {
+          resumeGame();
+        }
+        return;
+      }
+
+      if (game.state === 'START' && (e.code === 'Space' || e.code === 'Enter')) {
+        startGame();
+        return;
+      }
+      if (game.state === 'GAMEOVER' && (e.code === 'Space' || e.code === 'Enter')) {
+        startGame();
+        return;
+      }
+      if (game.state !== 'PLAYING') return;
+
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        triggerJumpInput(true);
+      } else if (e.code === 'Space') {
+        input.lagHeldKey = true;
+        document.getElementById('vbtn-lag').classList.add('pressed');
+      } else if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyQ') {
+        input.rewindPressedThisFrame = true;
+        document.getElementById('vbtn-rewind').classList.add('pressed');
+        setTimeout(() => document.getElementById('vbtn-rewind').classList.remove('pressed'), 140);
+      } else if (e.code === 'KeyS' || e.code === 'ArrowDown' || e.code === 'KeyE') {
+        input.phasePressedThisFrame = true;
+        document.getElementById('vbtn-phase').classList.add('pressed');
+        setTimeout(() => document.getElementById('vbtn-phase').classList.remove('pressed'), 140);
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') e.preventDefault();
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        triggerJumpInput(false);
+      } else if (e.code === 'Space') {
+        input.lagHeldKey = false;
+        document.getElementById('vbtn-lag').classList.remove('pressed');
+      }
+    });
+
+    // 鼠标在画布上长按也可触发【主动卡死】
+    canvas.addEventListener('pointerdown', (e) => {
+      if (game.state !== 'PLAYING') return;
+      input.lagHeldPointer = true;
+      document.getElementById('vbtn-lag').classList.add('pressed');
+    });
+    window.addEventListener('pointerup', () => {
+      input.lagHeldPointer = false;
+      document.getElementById('vbtn-lag').classList.remove('pressed');
+    });
+
+    // 右下角触屏虚拟按键事件绑定
+    function bindTouchButton(id, onDown, onUp) {
+      const el = document.getElementById(id);
+      el.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        el.classList.add('pressed');
+        onDown();
+      });
+      const release = (e) => {
+        e.stopPropagation();
+        el.classList.remove('pressed');
+        if (onUp) onUp();
+      };
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', release);
+      el.addEventListener('pointerleave', release);
+    }
+
+    bindTouchButton('vbtn-jump', () => triggerJumpInput(true), () => triggerJumpInput(false));
+    bindTouchButton('vbtn-lag', () => { input.lagHeldPointer = true; }, () => { input.lagHeldPointer = false; });
+    bindTouchButton('vbtn-rewind', () => { input.rewindPressedThisFrame = true; });
+    bindTouchButton('vbtn-phase', () => { input.phasePressedThisFrame = true; });
+
+    // 顶部暂停、音效与无障碍按钮
+    document.getElementById('btn-pause').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      if (game.state === 'PLAYING') pauseGame();
+      else if (game.state === 'PAUSED') resumeGame();
+    });
+
+    document.getElementById('btn-sfx').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      audio.enabled = !audio.enabled;
+      if (!audio.enabled) audio.stopLagDrone();
+      if (e && e.currentTarget) {
+        e.currentTarget.textContent = `SFX: ${audio.enabled ? 'ON' : 'OFF'}`;
+        e.currentTarget.classList.toggle('active', audio.enabled);
+      }
+    });
+
+    document.getElementById('btn-reduce-motion').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      reduceMotion = !reduceMotion;
+      wrapperEl.classList.toggle('reduce-motion', reduceMotion);
+      if (e && e.currentTarget) {
+        e.currentTarget.textContent = `减弱眩晕: ${reduceMotion ? 'ON' : 'OFF'}`;
+        e.currentTarget.classList.toggle('active', reduceMotion);
+      }
+    });
+
+    // 难度选择按钮切换逻辑 (同步开始页与结算页)
+    function selectDifficulty(diffKey) {
+      if (!DIFFICULTY_CONFIGS[diffKey]) return;
+      game.difficulty = diffKey;
+      const cfg = getDiff();
+      document.querySelectorAll('.diff-btn').forEach((btn) => {
+        btn.classList.toggle('selected', btn.getAttribute('data-diff') === diffKey);
+      });
+      const diffTag = document.getElementById('hud-diff-tag');
+      if (diffTag) diffTag.textContent = cfg.label;
+    }
+
+    document.querySelectorAll('.diff-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        if (e && e.currentTarget) e.currentTarget.blur();
+        audio.init();
+        audio.playPickup(false);
+        selectDifficulty(btn.getAttribute('data-diff'));
+      });
+    });
+
+    document.getElementById('btn-start').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      if (game.state === 'PLAYING') return;
+      startGame();
+    });
+    document.getElementById('btn-restart').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      if (game.state === 'PLAYING') return;
+      startGame();
+    });
+    document.getElementById('btn-resume').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      resumeGame();
+    });
+    document.getElementById('btn-pause-restart').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      startGame();
+    });
+    document.getElementById('btn-pause-home').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      returnToHome();
+    });
+    document.getElementById('btn-go-home').addEventListener('click', (e) => {
+      if (e && e.currentTarget) e.currentTarget.blur();
+      returnToHome();
+    });
+
+    // ============================================================================
+    // 8. 游戏生命周期与三大神技实现
+    // ============================================================================
+    function clearFocus() {
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+      }
+      if (typeof canvas.focus === 'function') {
+        canvas.focus();
+      }
+    }
+
+    function pauseGame() {
+      if (game.state !== 'PLAYING') return;
+      clearFocus();
+      game.state = 'PAUSED';
+      game.lagActive = false;
+      input.lagHeldKey = false;
+      input.lagHeldPointer = false;
+      input.jumpHeld = false;
+      wrapperEl.classList.remove('lag-active');
+      audio.stopLagDrone();
+
+      const diffCfg = getDiff();
+      const totalScore = Math.floor((Math.floor(game.distance) + game.bonusScore) * diffCfg.scoreMult);
+      document.getElementById('pause-distance').textContent = `${Math.floor(game.distance)}m`;
+      document.getElementById('pause-score').textContent = totalScore;
+      document.getElementById('pause-hp').textContent = `${Math.ceil(player.hp)}/${player.maxHp}`;
+      document.getElementById('pause-modal').classList.remove('hidden');
+    }
+
+    function resumeGame() {
+      if (game.state !== 'PAUSED') return;
+      clearFocus();
+      document.getElementById('pause-modal').classList.add('hidden');
+      lastTimestamp = performance.now();
+      game.state = 'PLAYING';
+    }
+
+    function returnToHome() {
+      clearFocus();
+      game.state = 'START';
+      game.lagActive = false;
+      game.phaseTimer = 0;
+      input.lagHeldKey = false;
+      input.lagHeldPointer = false;
+      input.jumpHeld = false;
+      wrapperEl.classList.remove('lag-active', 'phase-active');
+      audio.stopLagDrone();
+
+      document.getElementById('pause-modal').classList.add('hidden');
+      document.getElementById('gameover-modal').classList.add('hidden');
+      document.getElementById('start-modal').classList.remove('hidden');
+    }
+
+    function startGame() {
+      clearFocus();
+      audio.init();
+      document.getElementById('start-modal').classList.add('hidden');
+      document.getElementById('pause-modal').classList.add('hidden');
+      document.getElementById('gameover-modal').classList.add('hidden');
+
+      const diffCfg = getDiff();
+      document.getElementById('hud-diff-tag').textContent = diffCfg.label;
+
+      game.state = 'PLAYING';
+      game.distance = 0;
+      game.bonusScore = 0;
+      game.baseSpeed = diffCfg.baseSpeed;
+      game.currentSpeed = game.baseSpeed;
+      game.worldScrollX = 0;
+      game.nextSpawnX = 680;
+      game.lagActive = false;
+      game.bandwidth = 100;
+      game.bandwidthOverheated = false;
+      game.rewindCd = 0;
+      game.historyBuffer = [];
+      game.phaseTimer = 0;
+      game.phaseCd = 0;
+      input.lagHeldKey = false;
+      input.lagHeldPointer = false;
+      wrapperEl.classList.remove('lag-active', 'phase-active');
+
+      player.maxHp = diffCfg.maxHp;
+      player.hp = diffCfg.maxHp;
+      player.trailHp = diffCfg.maxHp;
+      player.y = GROUND_Y;
+      player.vy = 0;
+      player.height = player.normalHeight;
+      player.onGround = true;
+      player.coyoteTimer = COYOTE_TIME;
+      player.jumpBufferTimer = 0;
+      player.jumpsLeft = 2;
+      player.invulnTimer = 0;
+      player.flashTimer = 0;
+      player.triggerPop(1.25, 0.78, 0.2);
+
+      obstacles = [];
+      platforms = [];
+      collectibles = [];
+      particles.length = 0;
+      popTexts.length = 0;
+      rewindGhosts.length = 0;
+      shockwaves.length = 0;
+
+      while (game.nextSpawnX < W + 900) {
+        game.nextSpawnX = spawnObstaclePattern(game.nextSpawnX);
+      }
+    }
+
+    function gameOver(reasonText) {
+      clearFocus();
+      game.state = 'GAMEOVER';
+      game.lagActive = false;
+      game.phaseTimer = 0;
+      input.lagHeldKey = false;
+      input.lagHeldPointer = false;
+      wrapperEl.classList.remove('lag-active', 'phase-active');
+      audio.playCrash();
+      triggerFeedback(player.x + player.width / 2, player.y - player.height / 2, 'large', '#ff0055');
+
+      const diffCfg = getDiff();
+      const totalScore = Math.floor((Math.floor(game.distance) + game.bonusScore) * diffCfg.scoreMult);
+      if (totalScore > highScore) {
+        highScore = totalScore;
+        localStorage.setItem('lag_hero_best_score', String(highScore));
+      }
+
+      document.getElementById('death-reason').textContent = `[${diffCfg.label}难度] ${reasonText}`;
+      document.getElementById('go-distance').textContent = `${Math.floor(game.distance)}m`;
+      document.getElementById('go-score').textContent = totalScore;
+      document.getElementById('go-best').textContent = highScore;
+      document.getElementById('hud-best').textContent = `BEST: ${highScore}`;
+      document.getElementById('gameover-modal').classList.remove('hidden');
+    }
+
+    // 记录时空快照用于【神技二：丢包回溯】
+    function recordHistorySnapshot(nowSec) {
+      game.historyBuffer.push({
+        t: nowSec,
+        worldScrollX: game.worldScrollX,
+        distance: game.distance,
+        playerY: player.y,
+        playerVy: player.vy,
+        playerHp: player.hp,
+        onGround: player.onGround,
+        jumpsLeft: player.jumpsLeft
+      });
+
+      // 只保留最近 1.65 秒的数据
+      const cutoff = nowSec - (REWIND_HISTORY_SEC + 0.15);
+      while (game.historyBuffer.length > 0 && game.historyBuffer[0].t < cutoff) {
+        game.historyBuffer.shift();
+      }
+    }
+
+    // 触发【神技二：丢包回溯 (Packet Loss)】
+    function activatePacketLossRewind() {
+      if (game.rewindCd > 0 || game.historyBuffer.length < 4) return;
+
+      const diffCfg = getDiff();
+      const targetSnap = game.historyBuffer[0];
+      const deltaScroll = game.worldScrollX - targetSnap.worldScrollX;
+      if (deltaScroll <= 5) return;
+
+      // 生成 5 个沿原路倒退的半透明绿色残影
+      const steps = 5;
+      for (let i = 1; i <= steps; i++) {
+        const idx = Math.floor(((steps - i) / steps) * (game.historyBuffer.length - 1));
+        const snap = game.historyBuffer[idx];
+        const ghostOffsetX = snap.worldScrollX - targetSnap.worldScrollX;
+        rewindGhosts.push({
+          x: player.x + ghostOffsetX,
+          y: snap.playerY,
+          w: player.width,
+          h: player.normalHeight,
+          alpha: 0.78 * (i / steps),
+          life: 0,
+          maxLife: 0.42 + i * 0.05
+        });
+      }
+
+      // 将所有世界实体往右回退 deltaScroll（等价于玩家闪现回 1.5 秒前的位置！）
+      for (const obs of obstacles) {
+        obs.x += deltaScroll;
+        if (obs.type === 'FALLING_ROCK') {
+          obs.y = GROUND_Y - 320;
+          obs.vy = 0;
+          obs.triggered = false;
+          obs.landed = false;
+        }
+      }
+      for (const plat of platforms) plat.x += deltaScroll;
+      for (const item of collectibles) item.x += deltaScroll;
+      game.nextSpawnX += deltaScroll;
+
+      // 恢复玩家 1.5s 前状态（若 1.5s 内刚受过伤，连失去的血量也一并时空倒带挽回！）
+      const hpRestored = targetSnap.playerHp > player.hp ? (targetSnap.playerHp - player.hp) : 0;
+      game.worldScrollX = targetSnap.worldScrollX;
+      game.distance = targetSnap.distance;
+      player.y = targetSnap.playerY;
+      player.vy = targetSnap.playerVy;
+      if (targetSnap.playerHp > player.hp) {
+        player.hp = targetSnap.playerHp;
+      }
+      player.onGround = targetSnap.onGround;
+      player.jumpsLeft = 2;
+      player.invulnTimer = 0.55;
+      player.flashTimer = 0.25;
+      player.triggerPop(1.38, 0.68, 0.22);
+
+      game.historyBuffer = [];
+      game.rewindCd = diffCfg.rewindCd;
+
+      // 雪花屏 + 音效 + 顿帧反馈
+      camera.snowStaticTimer = 0.28;
+      camera.addVertigo(0.85);
+      audio.playRewind();
+      triggerFeedback(player.x + player.width / 2, player.y - player.height / 2, 'medium', '#00ff88');
+      const rewindLabel = hpRestored > 0
+        ? `⏪ 丢包回溯 -1.5s (挽回 +${hpRestored} HP!)`
+        : '⏪ 丢包回溯 -1.5s!';
+      spawnPopText(player.x + 20, player.y - 70, rewindLabel, '#00ff88', 17);
+    }
+
+    // 触发【神技三：穿模滑铲 (Collision Glitch) - 2.2秒超长持续 + 极短/无CD】
+    function activatePhaseSlide() {
+      if (game.phaseCd > 0) return;
+
+      const diffCfg = getDiff();
+      game.phaseTimer = PHASE_DURATION;
+      game.phaseCd = diffCfg.phaseCd;
+      player.height = player.slideHeight;
+      player.triggerPop(1.42, 0.56, 0.20);
+      wrapperEl.classList.add('phase-active');
+
+      // 若在空中按下穿模滑铲，提供快速下潜动量
+      if (!player.onGround && player.vy < 340) {
+        player.vy = 340;
+      }
+
+      audio.playPhaseGlitch(false);
+      triggerFeedback(player.x + player.width / 2, player.y - player.height / 2, 'medium', '#b829ff');
+      spawnPopText(player.x + 20, player.y - 60, `⚡ 穿模态 ON (${PHASE_DURATION}s)`, '#b829ff', 17);
+    }
+
+    // ============================================================================
+    // 9. 主物理与逻辑更新循环
+    // ============================================================================
+    let lastTimestamp = performance.now();
+    let elapsedGameTime = 0;
+
+    function update(now) {
+      const rawDt = Math.min(0.05, (now - lastTimestamp) / 1000);
+      lastTimestamp = now;
+
+      // 相机震屏与滤镜始终按真实帧率衰减 (`game-feel` 规范)
+      camera.update(rawDt);
+
+      // Hit-stop 顿帧缩放
+      const hitStopScale = hitStopState.getScale(now);
+      const dt = rawDt * hitStopScale;
+
+      if (game.state === 'PLAYING') {
+        elapsedGameTime += dt;
+        const diffCfg = getDiff();
+
+        // 头顶血条缓动白条平滑追赶当前血量
+        player.trailHp = lerp(player.trailHp, player.hp, Math.min(1, rawDt * 6.5));
+
+        // 1. 处理【神技一：主动卡死 (Lag Switch)】
+        if (input.isLagHeld && !game.bandwidthOverheated && game.bandwidth > 0) {
+          game.lagActive = true;
+          game.bandwidth = Math.max(0, game.bandwidth - diffCfg.lagDrain * rawDt);
+          if (game.bandwidth <= 0) {
+            game.bandwidthOverheated = true;
+            game.lagActive = false;
+            spawnPopText(player.x + 20, player.y - 80, 'BANDWIDTH EXHAUSTED!', '#ff0055', 15);
+          }
+        } else {
+          game.lagActive = false;
+          game.bandwidth = Math.min(100, game.bandwidth + diffCfg.lagRecharge * rawDt);
+          if (game.bandwidthOverheated && game.bandwidth >= 25) {
+            game.bandwidthOverheated = false;
+          }
+        }
+
+        if (game.lagActive) {
+          wrapperEl.classList.add('lag-active');
+          audio.startLagDrone();
+          // 主动卡死期间：持续震屏、强烈色散撕裂与眩晕重影
+          camera.addTrauma(0.52 * rawDt);
+          camera.chromaticPunch = Math.max(camera.chromaticPunch, 0.92);
+          camera.vertigoAmount = Math.min(1, camera.vertigoAmount + rawDt * 3.5);
+          camera.stutterTick += rawDt;
+        } else {
+          wrapperEl.classList.remove('lag-active');
+          audio.stopLagDrone();
+        }
+
+        // 2. 处理【神技二：丢包回溯】与【神技三：穿模滑铲】输入与冷却
+        if (game.rewindCd > 0) game.rewindCd = Math.max(0, game.rewindCd - rawDt);
+        // 穿模滑铲冷却在穿模态结束后开始计算（若 diffCfg.phaseCd === 0 则全程 0 冷却）
+        if (game.phaseTimer <= 0 && game.phaseCd > 0) {
+          game.phaseCd = Math.max(0, game.phaseCd - rawDt);
+        }
+
+        if (input.rewindPressedThisFrame) {
+          activatePacketLossRewind();
+        }
+        if (input.phasePressedThisFrame) {
+          activatePhaseSlide();
+        }
+
+        if (game.phaseTimer > 0) {
+          game.phaseTimer = Math.max(0, game.phaseTimer - rawDt);
+          player.height = player.slideHeight;
+          if (game.phaseTimer <= 0) {
+            player.height = player.normalHeight;
+            player.triggerPop(0.82, 1.22, 0.16);
+            wrapperEl.classList.remove('phase-active');
+          }
+        }
+
+        if (player.invulnTimer > 0) player.invulnTimer = Math.max(0, player.invulnTimer - rawDt);
+        if (player.flashTimer > 0) player.flashTimer = Math.max(0, player.flashTimer - rawDt);
+
+        // 3. 计算时间流速：
+        // 常态 = 1.0；主动卡死时：陷阱与世界流速骤降至 10% (0.10)，玩家横向推进保留灵巧卡点手感
+        const trapTimeScale = game.lagActive ? LAG_TIME_SCALE : 1.0;
+        const scrollTimeScale = game.lagActive ? 0.28 : 1.0; // 让玩家在 10% 定格的激光/闸门间从容穿过
+        const playerPhysicsDt = dt * (game.lagActive ? 0.42 : 1.0);
+
+        // 随距离递增奔跑速度
+        const speedMultiplier = 1 + Math.min(0.85, game.distance / 1800);
+        game.currentSpeed = game.baseSpeed * speedMultiplier;
+        const dx = game.currentSpeed * dt * scrollTimeScale;
+
+        game.worldScrollX += dx;
+        game.distance += dx / 48; // 每 48px 计为 1 米
+
+        // 4. 平台跳跃控制器 (`platformer` Pattern 1 & 2 + `feel-tuning.md` §1-3)
+        if (player.onGround) {
+          player.coyoteTimer = COYOTE_TIME;
+          player.jumpsLeft = 2;
+        } else {
+          player.coyoteTimer = Math.max(0, player.coyoteTimer - rawDt);
+        }
+
+        if (input.jumpPressedThisFrame) {
+          player.jumpBufferTimer = JUMP_BUFFER;
+        } else {
+          player.jumpBufferTimer = Math.max(0, player.jumpBufferTimer - rawDt);
+        }
+
+        // 触发跳跃：(A) 地面/土狼时间跳跃，或 (B) 空中二段跳
+        if (player.jumpBufferTimer > 0) {
+          if (player.coyoteTimer > 0) {
+            // 一段跳
+            player.vy = JUMP_VELOCITY;
+            player.onGround = false;
+            player.coyoteTimer = 0;
+            player.jumpBufferTimer = 0;
+            player.jumpsLeft = 1;
+            player.triggerPop(0.72, 1.34, 0.18);
+            audio.playJump(false);
+            spawnParticles(player.x + player.width / 2, player.y, 7, '#00f3ff', 0.7, 'dust');
+          } else if (player.jumpsLeft > 0) {
+            // 空中二段跳
+            player.vy = JUMP_VELOCITY * 0.92;
+            player.jumpBufferTimer = 0;
+            player.jumpsLeft--;
+            player.triggerPop(1.36, 0.70, 0.18);
+            audio.playJump(true);
+            triggerFeedback(player.x + player.width / 2, player.y, 'small', '#00ff88');
+            spawnPopText(player.x + 15, player.y - 10, 'DOUBLE JUMP', '#00ff88', 13);
+          }
+        }
+
+        // 可变跳跃高度：上升途中松开按键立即截断上升速度 (`VARIABLE_JUMP_CUT`)
+        if (input.jumpReleasedThisFrame && player.vy < 0) {
+          player.vy *= VARIABLE_JUMP_CUT;
+        }
+
+        // 非对称重力 + 顶点微悬停 (`feel-tuning.md` §1 & §3)
+        let g = player.vy > 0 ? FALL_GRAVITY : RISE_GRAVITY;
+        if (!player.onGround && Math.abs(player.vy) < APEX_THRESHOLD) {
+          g *= 0.5; // Apex hang 顶点悬停
+        }
+
+        // 半步重力积分 (Half-step integration) 保证不同帧率下跳跃高度一致
+        const prevY = player.y;
+        player.vy = Math.min(player.vy + 0.5 * g * playerPhysicsDt, MAX_FALL_SPEED);
+        player.y += player.vy * playerPhysicsDt;
+        player.vy = Math.min(player.vy + 0.5 * g * playerPhysicsDt, MAX_FALL_SPEED);
+
+        // 单向平台与地面碰撞检测 (`platformer` Pattern 3)
+        let landedThisFrame = false;
+        player.onGround = false;
+
+        // 检测单向赛博浮台 (仅从上方下落时踏上；按穿模滑铲可向下穿透)
+        if (player.vy >= 0 && game.phaseTimer <= 0) {
+          for (const plat of platforms) {
+            const horizontallyInside =
+              player.x + player.width * 0.8 > plat.x &&
+              player.x + player.width * 0.2 < plat.x + plat.w;
+            if (horizontallyInside && prevY <= plat.y + 4 && player.y >= plat.y) {
+              player.y = plat.y;
+              if (player.vy > 220) landedThisFrame = true;
+              player.vy = 0;
+              player.onGround = true;
+              break;
+            }
+          }
+        }
+
+        // 地面检测
+        if (player.y >= GROUND_Y) {
+          player.y = GROUND_Y;
+          if (player.vy > 240) landedThisFrame = true;
+          player.vy = 0;
+          player.onGround = true;
+        }
+
+        if (landedThisFrame) {
+          player.triggerPop(1.30, 0.72, 0.16);
+          audio.playLand();
+          spawnParticles(player.x + player.width / 2, player.y, 6, '#00f3ff', 0.65, 'dust');
+        }
+
+        // 更新玩家 Squash & Stretch 回弹动画 (`EaseOutBack`)
+        if (player.scaleTimer < 1) {
+          player.scaleTimer = Math.min(1, player.scaleTimer + rawDt / player.scaleDuration);
+          const eased = easeOutBack(player.scaleTimer);
+          player.scaleX = lerp(player.startScaleX, 1, eased);
+          player.scaleY = lerp(player.startScaleY, 1, eased);
+        } else {
+          player.scaleX = 1;
+          player.scaleY = 1;
+        }
+
+        player.runAnimTime += dt * scrollTimeScale * 14;
+
+        // 5. 生成与移动平台、收集物与障碍物
+        while (game.nextSpawnX - dx < W + 750) {
+          game.nextSpawnX = spawnObstaclePattern(game.nextSpawnX);
+        }
+        game.nextSpawnX -= dx;
+
+        for (let i = platforms.length - 1; i >= 0; i--) {
+          platforms[i].x -= dx;
+          if (platforms[i].x + platforms[i].w < -200) platforms.splice(i, 1);
+        }
+
+        // 玩家碰撞盒 (适当内缩 5px 提升跑酷宽容度)
+        const pBox = {
+          x: player.x + 6,
+          y: player.y - player.height + 5,
+          w: player.width - 12,
+          h: player.height - 8
+        };
+
+        // 收集金币与隐藏 Bug 碎片
+        for (let i = collectibles.length - 1; i >= 0; i--) {
+          const item = collectibles[i];
+          item.x -= dx;
+
+          // 穿模滑铲状态下对 Bug 碎片具有磁吸效果
+          if (!item.collected && item.type === 'BUG_SHARD' && game.phaseTimer > 0) {
+            const dist = Math.hypot((player.x + 20) - item.x, (player.y - 25) - item.y);
+            if (dist < 130) {
+              item.x = lerp(item.x, player.x + 20, 0.28);
+              item.y = lerp(item.y, player.y - 25, 0.28);
+            }
+          }
+
+          if (!item.collected) {
+            const cx = clamp(item.x, pBox.x, pBox.x + pBox.w);
+            const cy = clamp(item.y, pBox.y, pBox.y + pBox.h);
+            const distSq = (item.x - cx) ** 2 + (item.y - cy) ** 2;
+            if (distSq <= (item.r + 6) ** 2) {
+              item.collected = true;
+              if (item.type === 'BUG_SHARD') {
+                game.bonusScore += 150;
+                const oldHp = player.hp;
+                player.hp = Math.min(player.maxHp, player.hp + diffCfg.shardHeal);
+                const healed = player.hp - oldHp;
+                audio.playPickup(true);
+                triggerFeedback(item.x, item.y, 'medium', '#ff0055');
+                const healText = healed > 0 ? `+150 BUG碎片 (+${healed}HP)` : '+150 BUG 碎片!';
+                spawnPopText(item.x, item.y - 12, healText, '#ff0055', 16);
+              } else {
+                game.bonusScore += 30;
+                audio.playPickup(false);
+                triggerFeedback(item.x, item.y, 'small', '#ffe600');
+                spawnPopText(item.x, item.y - 10, '+30 DATA', '#ffe600', 13);
+              }
+            }
+          }
+
+          if (item.collected || item.x < -200) {
+            collectibles.splice(i, 1);
+          }
+        }
+
+        // 更新并检测障碍物碰撞
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          const obs = obstacles[i];
+          obs.x -= dx;
+
+          let collided = false;
+          let deathReason = '致命碰撞：未开启时空技能保护';
+
+          if (obs.type === 'LASER_SPINNER') {
+            // 旋转激光：角度受 trapTimeScale (主动卡死 10%) 控制！
+            obs.angle += obs.rotSpeed * dt * trapTimeScale;
+
+            // 检测玩家与旋转激光束的线段距离
+            const cx = obs.x;
+            const cy = obs.y;
+            const px = pBox.x + pBox.w / 2;
+            const py = pBox.y + pBox.h / 2;
+            const pr = Math.min(pBox.w, pBox.h) * 0.45;
+
+            const cosA = Math.cos(obs.angle);
+            const sinA = Math.sin(obs.angle);
+            const relX = px - cx;
+            const relY = py - cy;
+            const proj = clamp(relX * cosA + relY * sinA, -obs.radius, obs.radius);
+            const closestX = cx + proj * cosA;
+            const closestY = cy + proj * sinA;
+            const dist = Math.hypot(px - closestX, py - closestY);
+
+            if (dist < pr + 7) {
+              collided = true;
+              deathReason = '被高速旋转激光切碎（提示：长按 SPACE 主动卡死定格激光）';
+            }
+          } else if (obs.type === 'SLAM_GATE') {
+            // 下落闸门：开合周期受 trapTimeScale (主动卡死 10%) 控制！
+            obs.cycle += obs.cycleSpeed * dt * trapTimeScale;
+            // openRatio: 0 为完全闭合到地面，1 为升起留出下方通道
+            obs.openRatio = 0.5 + 0.5 * Math.sin(obs.cycle);
+            const currentGateH = obs.maxH * (1 - obs.openRatio * 0.65);
+
+            const gateBox = {
+              x: obs.x,
+              y: GROUND_Y - currentGateH,
+              w: obs.w,
+              h: currentGateH
+            };
+            if (rectOverlap(pBox, gateBox)) {
+              collided = true;
+              deathReason = '被高频下落闸门砸中（提示：待闸门升起时长按 SPACE 主动卡死通过）';
+            }
+          } else if (obs.type === 'FALLING_ROCK') {
+            // 赛博落石：接近玩家时触发坠落，坠落速度受 trapTimeScale (主动卡死 10%) 控制！
+            if (!obs.triggered && obs.x - player.x < 290) {
+              obs.triggered = true;
+            }
+            if (obs.triggered && !obs.landed) {
+              obs.vy += 1750 * dt * trapTimeScale;
+              obs.y += obs.vy * dt * trapTimeScale;
+              if (obs.y + obs.h >= GROUND_Y) {
+                obs.y = GROUND_Y - obs.h;
+                obs.landed = true;
+                camera.addTrauma(0.28);
+                spawnParticles(obs.x + obs.w / 2, GROUND_Y, 10, '#ff7700', 0.9, 'dust');
+              }
+            }
+            if (rectOverlap(pBox, obs)) {
+              collided = true;
+              deathReason = '被天降数据落石砸毁（提示：长按 SPACE 定格落石或按 SHIFT 丢包回溯）';
+            }
+          } else if (obs.type === 'FIREWALL') {
+            if (rectOverlap(pBox, obs)) {
+              collided = true;
+              deathReason = '撞上高耸实心电网墙（提示：按 S / E 触发穿模滑铲直接穿透）';
+            }
+          } else if (obs.type === 'SPIKE') {
+            if (rectOverlap(pBox, obs)) {
+              collided = true;
+              deathReason = '触碰地面高压电刺（提示：按 W / ↑ 跳跃或二段跳越过）';
+            }
+          }
+
+          // 若发生碰撞：判断是否有【穿模滑铲】或【无敌帧】保护
+          if (collided) {
+            if (game.phaseTimer > 0) {
+              // 穿模滑铲激活中：激荡出数字火花并给予穿模加分
+              spawnParticles(
+                player.x + player.width,
+                player.y - player.height / 2,
+                3,
+                '#00f3ff',
+                1.1,
+                'glitch'
+              );
+              if (!obs.phasedBonusGiven) {
+                obs.phasedBonusGiven = true;
+                game.bonusScore += 80;
+                audio.playPhaseGlitch(true);
+                triggerFeedback(player.x + player.width, player.y - 25, 'medium', '#00f3ff');
+                spawnPopText(player.x + 25, player.y - 75, '⚡ 穿模突破 +80!', '#00f3ff', 16);
+              }
+            } else if (player.invulnTimer > 0) {
+              // 处于受击或回溯后的短暂无敌保护帧，免除重复伤害
+            } else {
+              // 扣除对应难度的生命值
+              player.hp = Math.max(0, player.hp - diffCfg.hitDamage);
+              if (player.hp > 0) {
+                // 未致死：触发受击顿帧、震屏、无敌闪烁保护，提示可按 SHIFT 丢包回溯挽回血量
+                player.invulnTimer = 1.15;
+                player.flashTimer = 0.25;
+                if (player.vy >= -100) player.vy = JUMP_VELOCITY * 0.45;
+                player.triggerPop(1.38, 0.65, 0.22);
+                audio.playHurt();
+                triggerFeedback(player.x + player.width / 2, player.y - player.height / 2, 'large', '#ff0055');
+                spawnPopText(player.x + 20, player.y - 75, `-${diffCfg.hitDamage} HP! (可按SHIFT回溯)`, '#ff0055', 16);
+              } else {
+                gameOver(deathReason);
+                break;
+              }
+            }
+          }
+
+          if (obs.x < -300) {
+            obstacles.splice(i, 1);
+          }
+        }
+
+        // 记录历史快照供丢包回溯使用
+        recordHistorySnapshot(elapsedGameTime);
+      }
+
+      // 更新粒子、浮动文字、回溯残影 (不受主动卡死减速影响，保持视觉丝滑)
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life += rawDt;
+        p.x += p.vx * rawDt;
+        p.y += p.vy * rawDt;
+        p.vy += 380 * rawDt;
+        if (p.life >= p.maxLife) particles.splice(i, 1);
+      }
+
+      for (let i = popTexts.length - 1; i >= 0; i--) {
+        const pt = popTexts[i];
+        pt.life += rawDt;
+        pt.x += pt.vx * rawDt;
+        pt.y += pt.vy * rawDt * (1 - pt.life / pt.maxLife);
+        if (pt.life >= pt.maxLife) popTexts.splice(i, 1);
+      }
+
+      for (let i = rewindGhosts.length - 1; i >= 0; i--) {
+        rewindGhosts[i].life += rawDt;
+        if (rewindGhosts[i].life >= rewindGhosts[i].maxLife) {
+          rewindGhosts.splice(i, 1);
+        }
+      }
+
+      for (let i = shockwaves.length - 1; i >= 0; i--) {
+        shockwaves[i].life += rawDt;
+        if (shockwaves[i].life >= shockwaves[i].maxLife) {
+          shockwaves.splice(i, 1);
+        }
+      }
+
+      // 重置单帧触发的输入标志
+      input.jumpPressedThisFrame = false;
+      input.jumpReleasedThisFrame = false;
+      input.rewindPressedThisFrame = false;
+      input.phasePressedThisFrame = false;
+
+      updateHUD();
+      render();
+      requestAnimationFrame(update);
+    }
+
+    function rectOverlap(a, b) {
+      return (
+        a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
+      );
+    }
+
+    // ============================================================================
+    // 10. HUD 界面状态同步
+    // ============================================================================
+    function updateHUD() {
+      const diffCfg = getDiff();
+      const distInt = Math.floor(game.distance);
+      const totalScore = Math.floor((distInt + game.bonusScore) * diffCfg.scoreMult);
+      document.getElementById('hud-distance').textContent = `${distInt}m`;
+      document.getElementById('hud-score').textContent = totalScore;
+      document.getElementById('hud-speed').textContent = `SPEED: ${(game.currentSpeed / 390).toFixed(1)}x`;
+
+      // 生命值血条更新 (含受击延迟缓冲白条)
+      const hpPct = clamp((player.hp / player.maxHp) * 100, 0, 100);
+      const hpFill = document.getElementById('hp-fill');
+      const hpTrail = document.getElementById('hp-trail');
+      const hpText = document.getElementById('hp-text');
+      hpFill.style.width = `${hpPct}%`;
+      hpTrail.style.width = `${hpPct}%`;
+      hpText.textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+      hpFill.classList.toggle('hp-warn', hpPct <= 60 && hpPct > 30);
+      hpFill.classList.toggle('hp-danger', hpPct <= 30);
+
+      // 带宽能量槽
+      const bwFill = document.getElementById('bandwidth-fill');
+      const bwText = document.getElementById('bandwidth-text');
+      bwFill.style.width = `${game.bandwidth}%`;
+      bwText.textContent = game.bandwidthOverheated
+        ? 'OVERHEATED!'
+        : `${Math.ceil(game.bandwidth)}%`;
+      bwFill.classList.toggle('draining', game.lagActive);
+      bwFill.classList.toggle('overheated', game.bandwidthOverheated);
+
+      // Ping 监控器 (突出卡顿与掉帧状态)
+      const pingBox = document.getElementById('ping-box');
+      const pingText = document.getElementById('ping-text');
+      if (game.lagActive) {
+        pingBox.classList.add('lag-danger');
+        pingText.textContent = 'Ping: 999ms! | FPS: 4 [卡顿]';
+      } else {
+        pingBox.classList.remove('lag-danger');
+        const jitter = 23 + Math.floor(Math.sin(performance.now() * 0.005) * 3);
+        pingText.textContent = `Ping: ${jitter}ms | 60 FPS`;
+      }
+
+      // 丢包回溯冷却显示
+      const badgeRewind = document.getElementById('badge-rewind');
+      const timerRewind = document.getElementById('timer-rewind');
+      const cdRewind = document.getElementById('cd-rewind');
+      const vcdRewind = document.getElementById('vcd-rewind');
+      if (game.rewindCd > 0) {
+        badgeRewind.classList.remove('ready');
+        timerRewind.textContent = `${game.rewindCd.toFixed(1)}s`;
+        timerRewind.style.color = '#ff6b8b';
+        const pct = (game.rewindCd / diffCfg.rewindCd) * 100;
+        cdRewind.style.height = `${pct}%`;
+        vcdRewind.style.height = `${pct}%`;
+      } else {
+        badgeRewind.classList.add('ready');
+        timerRewind.textContent = 'READY';
+        timerRewind.style.color = '#00ff88';
+        cdRewind.style.height = '0%';
+        vcdRewind.style.height = '0%';
+      }
+
+      // 穿模滑铲冷却显示 (支持 0 CD 无冷却显示)
+      const badgePhase = document.getElementById('badge-phase');
+      const timerPhase = document.getElementById('timer-phase');
+      const cdPhase = document.getElementById('cd-phase');
+      const vcdPhase = document.getElementById('vcd-phase');
+      badgePhase.classList.toggle('active-skill', game.phaseTimer > 0);
+      if (game.phaseTimer > 0) {
+        timerPhase.textContent = `ACTIVE ${game.phaseTimer.toFixed(1)}s`;
+        timerPhase.style.color = '#ffe600';
+        cdPhase.style.height = '0%';
+        vcdPhase.style.height = '0%';
+      } else if (game.phaseCd > 0 && diffCfg.phaseCd > 0) {
+        badgePhase.classList.remove('ready');
+        timerPhase.textContent = `${game.phaseCd.toFixed(1)}s`;
+        timerPhase.style.color = '#ff6b8b';
+        const pct = (game.phaseCd / diffCfg.phaseCd) * 100;
+        cdPhase.style.height = `${pct}%`;
+        vcdPhase.style.height = `${pct}%`;
+      } else {
+        badgePhase.classList.add('ready');
+        timerPhase.textContent = diffCfg.phaseCd === 0 ? 'NO CD' : 'READY';
+        timerPhase.style.color = '#00ff88';
+        cdPhase.style.height = '0%';
+        vcdPhase.style.height = '0%';
+      }
+    }
+
+    // ============================================================================
+    // 11. 赛博故障风渲染引擎 (Canvas 2D)
+    // ============================================================================
+    function render() {
+      ctx.save();
+      ctx.clearRect(0, 0, W, H);
+
+      // 光学眩晕缩放与呼吸摇摆 (Vertigo Zoom & Swirl)
+      const vAmt = reduceMotion ? 0 : camera.vertigoAmount;
+      const vertigoZoom = 1 + vAmt * (0.018 + Math.sin(performance.now() * 0.012) * 0.012);
+      const vertigoSkewX = vAmt * Math.sin(performance.now() * 0.009) * 0.018;
+
+      // 应用 Trauma 相机偏移、眩晕缩放与旋转 (`game-feel` Pattern 1)
+      ctx.translate(W / 2 + camera.offsetX, H / 2 + camera.offsetY);
+      ctx.rotate(camera.roll + vAmt * Math.sin(performance.now() * 0.007) * 0.015);
+      ctx.scale(vertigoZoom, vertigoZoom);
+      if (vAmt > 0.05) {
+        ctx.transform(1, 0, vertigoSkewX, 1, 0, 0);
+      }
+      ctx.translate(-W / 2, -H / 2);
+
+      // 1. 绘制赛博视差背景与数据流
+      drawCyberBackground();
+
+      // 2. 绘制单向赛博浮台
+      for (const plat of platforms) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 243, 255, 0.22)';
+        ctx.strokeStyle = '#00f3ff';
+        ctx.lineWidth = 2;
+        ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+        ctx.strokeRect(plat.x, plat.y, plat.w, plat.h);
+
+        // 顶部发光导轨
+        ctx.fillStyle = '#00ff88';
+        ctx.fillRect(plat.x, plat.y, plat.w, 3);
+        ctx.restore();
+      }
+
+      // 3. 绘制地面与赛博透视网格
+      drawCyberGround();
+
+      // 4. 绘制数据金币与隐藏 Bug 碎片
+      for (const item of collectibles) {
+        drawCollectible(item);
+      }
+
+      // 5. 绘制四大障碍物 (当眩晕度高时叠加幻影重影)
+      for (const obs of obstacles) {
+        if (vAmt > 0.2) {
+          ctx.save();
+          ctx.globalAlpha = vAmt * 0.28;
+          ctx.translate(Math.sin(performance.now() * 0.02) * 14 * vAmt, Math.cos(performance.now() * 0.018) * 6 * vAmt);
+          drawObstacle(obs);
+          ctx.restore();
+        }
+        drawObstacle(obs);
+      }
+
+      // 6. 绘制【丢包回溯】半透明绿色倒带残影
+      for (const g of rewindGhosts) {
+        const k = 1 - g.life / g.maxLife;
+        ctx.save();
+        ctx.globalAlpha = g.alpha * k;
+        ctx.fillStyle = '#00ff88';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(g.x, g.y - g.h, g.w, g.h);
+        ctx.strokeRect(g.x, g.y - g.h, g.w, g.h);
+        // 残影故障横纹
+        ctx.fillStyle = '#00f3ff';
+        ctx.fillRect(g.x - 6, g.y - g.h * 0.65, g.w + 12, 4);
+        ctx.restore();
+      }
+
+      // 7. 绘制主角（包含 Squash & Stretch 挤压拉伸、穿模像素马赛克、RGB 色彩撕裂、卡顿缓冲转圈）
+      drawPlayer();
+
+      // 8. 绘制故障冲击波环与粒子、浮动得分文字
+      drawParticlesAndPopTexts();
+
+      ctx.restore();
+
+      // 9. 全屏后处理特效：眩晕幻觉、卡顿坏块马赛克、RGB 色彩撕裂、丢包雪花屏
+      drawPostProcessing();
+    }
+
+    function drawCyberBackground() {
+      // 远景建筑剪影
+      for (const b of game.bgBuildings) {
+        const screenX = ((b.x - game.worldScrollX * b.layer) % (W + 320) + (W + 320)) % (W + 320) - 160;
+        ctx.fillStyle = b.layer < 0.3 ? 'rgba(12, 18, 38, 0.75)' : 'rgba(18, 26, 52, 0.85)';
+        ctx.fillRect(screenX, GROUND_Y - b.h, b.w, b.h);
+        ctx.strokeStyle = b.hue;
+        ctx.globalAlpha = 0.22;
+        ctx.strokeRect(screenX, GROUND_Y - b.h, b.w, b.h);
+        ctx.globalAlpha = 1;
+      }
+
+      // 横向流动数据光线
+      ctx.fillStyle = game.lagActive ? 'rgba(255, 0, 85, 0.35)' : 'rgba(0, 243, 255, 0.22)';
+      for (const line of game.dataLines) {
+        const sx = ((line.x - game.worldScrollX * 0.65) % (W + 200) + (W + 200)) % (W + 200) - 100;
+        ctx.fillRect(sx, line.y, line.len, 2);
+      }
+    }
+
+    function drawCyberGround() {
+      // 地面发光主线
+      ctx.fillStyle = '#070a14';
+      ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+
+      ctx.strokeStyle = game.lagActive ? '#ff0055' : '#00f3ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, GROUND_Y);
+      ctx.lineTo(W, GROUND_Y);
+      ctx.stroke();
+
+      // 赛博透视移动网格线
+      const gridStep = 64;
+      const offset = -(game.worldScrollX % gridStep);
+      ctx.strokeStyle = game.lagActive ? 'rgba(255, 0, 85, 0.28)' : 'rgba(0, 243, 255, 0.22)';
+      ctx.lineWidth = 1.5;
+
+      for (let x = offset; x < W + gridStep; x += gridStep) {
+        ctx.beginPath();
+        ctx.moveTo(x, GROUND_Y);
+        ctx.lineTo(x - 90, H);
+        ctx.stroke();
+      }
+
+      for (let y = GROUND_Y + 22; y < H; y += 26) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+    }
+
+    function drawCollectible(item) {
+      ctx.save();
+      ctx.translate(item.x, item.y);
+      const pulse = 1 + 0.12 * Math.sin(performance.now() * 0.008 + item.x);
+      ctx.scale(pulse, pulse);
+
+      if (item.type === 'BUG_SHARD') {
+        // 隐藏 Bug 碎片：紫红故障菱形晶体
+        ctx.fillStyle = '#ff0055';
+        ctx.strokeStyle = '#00f3ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -item.r);
+        ctx.lineTo(item.r, 0);
+        ctx.lineTo(0, item.r);
+        ctx.lineTo(-item.r, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 故障像素伪影
+        ctx.fillStyle = '#ffe600';
+        ctx.fillRect(-item.r * 0.8, -3, item.r * 1.6, 3);
+      } else {
+        // 数据金币：赛博金环
+        ctx.fillStyle = '#ffe600';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, item.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#070810';
+        ctx.fillRect(-3, -5, 6, 10);
+      }
+      ctx.restore();
+    }
+
+    function drawObstacle(obs) {
+      ctx.save();
+
+      if (obs.type === 'LASER_SPINNER') {
+        // 激光轴承与旋转射线
+        const cosA = Math.cos(obs.angle);
+        const sinA = Math.sin(obs.angle);
+        const x1 = obs.x - cosA * obs.radius;
+        const y1 = obs.y - sinA * obs.radius;
+        const x2 = obs.x + cosA * obs.radius;
+        const y2 = obs.y + sinA * obs.radius;
+
+        // 外发光光束
+        ctx.strokeStyle = game.lagActive ? '#00f3ff' : '#ff0055';
+        ctx.lineWidth = 12;
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // 核心高能激光
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // 中心旋转核心
+        ctx.fillStyle = '#182238';
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(obs.x, obs.y, obs.hubRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (obs.type === 'FIREWALL') {
+        // 巨型实心电网墙
+        const grad = ctx.createLinearGradient(obs.x, obs.y, obs.x + obs.w, obs.y);
+        grad.addColorStop(0, 'rgba(255, 0, 85, 0.78)');
+        grad.addColorStop(0.5, 'rgba(184, 41, 255, 0.55)');
+        grad.addColorStop(1, 'rgba(255, 0, 85, 0.78)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+
+        // 内部电网横条纹
+        ctx.strokeStyle = 'rgba(255, 230, 0, 0.55)';
+        ctx.lineWidth = 1.5;
+        for (let y = obs.y + 18; y < obs.y + obs.h; y += 24) {
+          ctx.beginPath();
+          ctx.moveTo(obs.x + 4, y);
+          ctx.lineTo(obs.x + obs.w - 4, y);
+          ctx.stroke();
+        }
+      } else if (obs.type === 'SLAM_GATE') {
+        // 高频下落闸门
+        const currentGateH = obs.maxH * (1 - obs.openRatio * 0.65);
+        const gy = GROUND_Y - currentGateH;
+
+        // 闸门立柱导轨
+        ctx.strokeStyle = 'rgba(0, 243, 255, 0.25)';
+        ctx.strokeRect(obs.x + 6, GROUND_Y - obs.maxH, obs.w - 12, obs.maxH);
+
+        // 闸门实体
+        ctx.fillStyle = '#ff0055';
+        ctx.fillRect(obs.x, gy, obs.w, currentGateH);
+        ctx.strokeStyle = '#ffe600';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(obs.x, gy, obs.w, currentGateH);
+      } else if (obs.type === 'FALLING_ROCK') {
+        // 地面红色预警线
+        if (!obs.landed) {
+          ctx.strokeStyle = 'rgba(255, 0, 85, 0.55)';
+          ctx.setLineDash([6, 6]);
+          ctx.beginPath();
+          ctx.moveTo(obs.x + obs.w / 2, obs.y + obs.h);
+          ctx.lineTo(obs.x + obs.w / 2, GROUND_Y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // 数据落石本体
+        ctx.fillStyle = '#ff5500';
+        ctx.strokeStyle = '#ffe600';
+        ctx.lineWidth = 2.5;
+        ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+        ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+      } else if (obs.type === 'SPIKE') {
+        // 地面电刺三角形阵列
+        const count = Math.max(2, Math.floor(obs.w / 24));
+        const step = obs.w / count;
+        ctx.fillStyle = '#ff0055';
+        ctx.strokeStyle = '#00f3ff';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < count; i++) {
+          const sx = obs.x + i * step;
+          ctx.beginPath();
+          ctx.moveTo(sx, GROUND_Y);
+          ctx.lineTo(sx + step / 2, obs.y);
+          ctx.lineTo(sx + step, GROUND_Y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
+      // 障碍物顶部战术提示标签
+      if (obs.hint && obs.x > 60 && obs.x < W - 40) {
+        ctx.fillStyle = 'rgba(232, 244, 255, 0.78)';
+        ctx.font = 'bold 11px "Segoe UI", "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        const labelY = obs.type === 'LASER_SPINNER' ? obs.y - obs.radius - 14 : (obs.y - 12);
+        ctx.fillText(obs.hint, obs.x + (obs.w ? obs.w / 2 : 0), Math.max(95, labelY));
+      }
+
+      ctx.restore();
+    }
+
+    function drawPlayer() {
+      ctx.save();
+
+      // 以角色底部中心为锚点做 Squash & Stretch 缩放 (`game-feel` Pattern 3)
+      const pivotX = player.x + player.width / 2;
+      const pivotY = player.y;
+      ctx.translate(pivotX, pivotY);
+      ctx.scale(player.scaleX, player.scaleY);
+
+      const w = player.width;
+      const h = player.height;
+      const left = -w / 2;
+      const top = -h;
+
+      // 主动卡死或碰撞时绘制 RGB 色彩分离重影
+      if (game.lagActive || camera.chromaticPunch > 0.1) {
+        const split = game.lagActive ? 6 : camera.chromaticPunch * 7;
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = '#ff0055';
+        ctx.fillRect(left - split, top, w, h);
+        ctx.fillStyle = '#00f3ff';
+        ctx.fillRect(left + split, top, w, h);
+        ctx.globalAlpha = 1;
+      }
+
+      // 【穿模滑铲】状态下：角色呈现像素块故障闪烁 (Mosaic Glitch Blocks)
+      if (game.phaseTimer > 0) {
+        const cols = 4;
+        const rows = 5;
+        const cw = w / cols;
+        const ch = h / rows;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            if (Math.random() < 0.18) continue; // 像素块随机闪烁缺失
+            const jitterX = (Math.random() - 0.5) * 9;
+            const jitterY = (Math.random() - 0.5) * 4;
+            ctx.fillStyle = (r + c) % 2 === 0 ? '#b829ff' : '#00f3ff';
+            ctx.fillRect(left + c * cw + jitterX, top + r * ch + jitterY, cw - 1, ch - 1);
+          }
+        }
+        // 穿模护盾外框
+        ctx.strokeStyle = '#ffe600';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(left - 4, top - 3, w + 8, h + 6);
+      } else {
+        // 常态赛博特工外观
+        ctx.fillStyle = player.flashTimer > 0 ? '#ffffff' : '#00f3ff';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.fillRect(left, top, w, h);
+        ctx.strokeRect(left, top, w, h);
+
+        // 赛博发光护目镜
+        ctx.fillStyle = '#ff0055';
+        ctx.fillRect(left + w * 0.38, top + 10, w * 0.55, 9);
+
+        // 奔跑动态能量飘带
+        const scarfWave = Math.sin(player.runAnimTime) * 6;
+        ctx.fillStyle = '#00ff88';
+        ctx.beginPath();
+        ctx.moveTo(left, top + 16);
+        ctx.lineTo(left - 24, top + 12 + scarfWave);
+        ctx.lineTo(left - 18, top + 24 + scarfWave);
+        ctx.closePath();
+        ctx.fill();
+
+        // 受击/回溯后的无敌保护闪烁光环
+        if (player.invulnTimer > 0) {
+          ctx.strokeStyle = Math.sin(performance.now() * 0.04) > 0 ? '#00ff88' : '#ff0055';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(left - 5, top - 4, w + 10, h + 8);
+        }
+      }
+
+      ctx.restore();
+
+      // 绘制角色头顶跟随微缩血条 (带缓动残影白条) 与【卡顿缓冲转圈图标】
+      if (game.state === 'PLAYING' || game.state === 'PAUSED') {
+        const barW = 48;
+        const barH = 6;
+        const bx = player.x + player.width / 2 - barW / 2;
+        const by = player.y - player.height * player.scaleY - 16;
+        const hpRatio = clamp(player.hp / player.maxHp, 0, 1);
+        const trailRatio = clamp(player.trailHp / player.maxHp, 0, 1);
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(7, 10, 20, 0.85)';
+        ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+
+        // 缓动残影白条
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.fillRect(bx, by, barW * trailRatio, barH);
+
+        // 实时血量色条
+        ctx.fillStyle = hpRatio > 0.6 ? '#00ff88' : (hpRatio > 0.3 ? '#ffe600' : '#ff0055');
+        ctx.fillRect(bx, by, barW * hpRatio, barH);
+
+        ctx.strokeStyle = 'rgba(0, 243, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx - 1, by - 1, barW + 2, barH + 2);
+
+        // 触发【主动卡死】时：头顶渲染跳帧卡顿的 BUFFERING 转圈加载环
+        if (game.lagActive) {
+          const cx = player.x + player.width / 2;
+          const cy = by - 22;
+          // 故意量化为 8 个离散阶梯角度，制造“网络卡死转圈一顿一顿”的真实视觉感
+          const stepAngle = Math.floor(performance.now() / 110) * (Math.PI / 4);
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(stepAngle);
+          ctx.strokeStyle = '#ff0055';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, 9, 0, Math.PI * 1.35);
+          ctx.stroke();
+          ctx.strokeStyle = '#00f3ff';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 5, Math.PI, Math.PI * 2.1);
+          ctx.stroke();
+          ctx.restore();
+
+          ctx.font = '900 10px "Courier New", monospace';
+          ctx.fillStyle = '#ffe600';
+          ctx.textAlign = 'center';
+          ctx.fillText('BUFFERING 999ms...', cx, cy - 13);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function drawParticlesAndPopTexts() {
+      // 绘制故障冲击波扩散环 (Shockwave Rings)
+      for (const sw of shockwaves) {
+        const progress = sw.life / sw.maxLife;
+        const radius = 12 + easeOutCubic(progress) * sw.maxRadius;
+        const alpha = (1 - progress) * 0.75;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = sw.color;
+        ctx.lineWidth = Math.max(1.5, (1 - progress) * 5);
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      for (const p of particles) {
+        const k = 1 - p.life / p.maxLife;
+        ctx.save();
+        ctx.globalAlpha = k;
+        ctx.fillStyle = p.color;
+        if (p.style === 'glitch') {
+          ctx.fillRect(p.x - p.size / 2, p.y - p.size * 0.25, p.size * 1.4, p.size * 0.5);
+        } else {
+          ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+        }
+        ctx.restore();
+      }
+
+      for (const pt of popTexts) {
+        const progress = pt.life / pt.maxLife;
+        const alpha = 1 - easeOutCubic(progress);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = `900 ${pt.size}px "Segoe UI", "Microsoft YaHei", monospace`;
+        ctx.fillStyle = pt.color;
+        ctx.strokeStyle = '#050811';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'center';
+        ctx.strokeText(pt.text, pt.x, pt.y);
+        ctx.fillText(pt.text, pt.x, pt.y);
+        ctx.restore();
+      }
+    }
+
+    function drawPostProcessing() {
+      // 1. 光学眩晕边缘径向紫青晕影 (Optical Vertigo Vignette)
+      if (camera.vertigoAmount > 0.05 && !reduceMotion) {
+        ctx.save();
+        const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.65);
+        grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        grad.addColorStop(0.7, `rgba(184, 41, 255, ${camera.vertigoAmount * 0.14})`);
+        grad.addColorStop(1, `rgba(255, 0, 85, ${camera.vertigoAmount * 0.32})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+
+      // 2. 【主动卡死 / 穿模】RGB 画面水平撕裂带 + Datamosh 坏块马赛克伪影
+      if ((game.lagActive || game.phaseTimer > 0) && !reduceMotion) {
+        const sliceCount = game.lagActive ? 6 : 3;
+        for (let i = 0; i < sliceCount; i++) {
+          const sliceY = Math.random() * H;
+          const sliceH = 6 + Math.random() * 26;
+          const shift = (Math.random() - 0.5) * 34;
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 0, 85, 0.16)' : 'rgba(0, 243, 255, 0.16)';
+          ctx.fillRect(shift, sliceY, W, sliceH);
+        }
+
+        // 随机视频解码坏块 (Datamosh Corruption Macroblocks)
+        const blockCount = game.lagActive ? 8 : 4;
+        for (let b = 0; b < blockCount; b++) {
+          const bx = Math.floor((Math.random() * W) / 24) * 24;
+          const by = Math.floor((Math.random() * H) / 24) * 24;
+          const bw = 24 + Math.floor(Math.random() * 4) * 24;
+          const bh = 12 + Math.floor(Math.random() * 2) * 12;
+          ctx.fillStyle = b % 3 === 0
+            ? 'rgba(0, 243, 255, 0.22)'
+            : (b % 3 === 1 ? 'rgba(255, 0, 85, 0.22)' : 'rgba(255, 230, 0, 0.18)');
+          ctx.fillRect(bx, by, bw, bh);
+        }
+      }
+
+      // 3. 【丢包回溯】电视雪花屏 + VHS 倒带磁道横纹特效 (TV Static & VHS Rewind)
+      if (camera.snowStaticTimer > 0) {
+        const intensity = (camera.snowStaticTimer / 0.24) * (reduceMotion ? 0.35 : 0.75);
+        ctx.save();
+        ctx.globalAlpha = intensity;
+        const bands = 28;
+        for (let i = 0; i < bands; i++) {
+          const by = (i / bands) * H;
+          const bh = H / bands;
+          ctx.fillStyle = Math.random() > 0.5 ? 'rgba(220, 255, 240, 0.38)' : 'rgba(0, 255, 136, 0.25)';
+          ctx.fillRect((Math.random() - 0.5) * 40, by, W, bh * 0.6);
+        }
+        ctx.font = '900 22px "Courier New", monospace';
+        ctx.fillStyle = '#00ff88';
+        ctx.fillText('⏪ REWINDING PACKET [-1.5s]', 36, H - 36);
+        ctx.restore();
+      }
+
+      // 4. 大碰撞白光闪烁 (遵守 WCAG 2.3.1 光敏安全阈值)
+      if (camera.whiteFlash > 0 && !reduceMotion) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${camera.whiteFlash * 0.35})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    // 启动主循环
+    requestAnimationFrame(update);
+  </script>
+</body>
+</html>
